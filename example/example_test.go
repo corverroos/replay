@@ -5,7 +5,6 @@ import (
 	"github.com/corverroos/replay"
 	"github.com/corverroos/replay/client"
 	"github.com/corverroos/replay/db"
-	"github.com/golang/protobuf/proto"
 	"github.com/luno/jettison/jtest"
 	"github.com/luno/jettison/log"
 	"github.com/luno/reflex/rpatterns"
@@ -32,24 +31,19 @@ func TestExample(t *testing.T) {
 
 type Backends struct{}
 
-func GreetingWorkflow(ctx replay.RunContext, args proto.Message) error {
+func GreetingWorkflow(ctx replay.RunContext, name *String) {
 	for i := 0; i < 5; i++ {
-		var err error
-		args, err = ctx.ExecuteActivity(EnrichGreeting, args)
-		if err != nil {
-			return err
-		}
+		name = ctx.ExecActivity(EnrichGreeting, name).(*String)
 	}
 
-	_, err := ctx.ExecuteActivity(PrintGreeting, args)
-	return err
+	ctx.ExecActivity(PrintGreeting, name)
 }
 
-func EnrichGreeting(ctx context.Context, b Backends, msg proto.Message) (proto.Message, error) {
-	return &String{Value: "[" + msg.(*String).Value + "]"}, nil
+func EnrichGreeting(ctx context.Context, b Backends, msg *String) (*String, error) {
+	return &String{Value: "[" + msg.Value + "]"}, nil
 }
 
-func PrintGreeting(ctx context.Context, b Backends, msg proto.Message) (proto.Message, error) {
-	log.Info(ctx, "Hello "+msg.(*String).Value)
+func PrintGreeting(ctx context.Context, b Backends, msg *String) (*Empty, error) {
+	log.Info(ctx, "Hello "+msg.Value)
 	return &Empty{}, nil
 }

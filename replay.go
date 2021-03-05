@@ -27,8 +27,6 @@ type Client interface {
 	Stream(ctx context.Context, after string, opts ...reflex.StreamOption) (reflex.StreamClient, error)
 }
 
-type WorkflowFunc func(RunContext, proto.Message) error
-
 func RegisterActivity(cl Client, cstore reflex.CursorStore, backends interface{}, activityFunc interface{}) {
 	activity := getFunctionName(activityFunc)
 
@@ -75,8 +73,10 @@ func RegisterActivity(cl Client, cstore reflex.CursorStore, backends interface{}
 	go rpatterns.RunForever(func() context.Context{ return context.Background()}, spec)
 }
 
-func RegisterWorkflow(cl Client, cstore reflex.CursorStore, workflowFunc WorkflowFunc) {
+func RegisterWorkflow(cl Client, cstore reflex.CursorStore, workflowFunc interface{}) {
 	workflow := getFunctionName(workflowFunc) // TODO(corver): Prefix service name.
+
+	// TODO(corver): Validate workflowfunc signature.
 
 	r := runner{
 		cl:           cl,
@@ -159,7 +159,7 @@ type runner struct {
 
 	cl           Client
 	workflow     string
-	workflowFunc WorkflowFunc
+	workflowFunc interface{}
 
 	runs map[string]*runState
 }
@@ -180,17 +180,11 @@ func (r *runner) StartRun(ctx context.Context, run string, args proto.Message) e
 
 	go func() {
 		for {
-			if err := r.run(ctx, run, args, s); err != nil {
-				log.Error(ctx, errors.Wrap(err, "run"))
-				time.Sleep(time.Minute)
-				continue
-			}
+			r.run(ctx, run, args, s)
 
-			if err := r.cl.CompleteRun(ctx, r.workflow, run); err != nil {
-				log.Error(ctx, errors.Wrap(err, "run"))
-				time.Sleep(time.Minute)
-				continue
-			}
+			ensure(ctx, func() error {
+				return r.cl.CompleteRun(ctx, r.workflow, run)
+			})
 
 			return
 		}
@@ -212,14 +206,19 @@ func (r *runner) RespondActivity(ctx context.Context, run string, activity strin
 	return nil
 }
 
-func (r *runner) run(ctx context.Context, run string, args proto.Message,state *runState ) error {
-	return r.workflowFunc(RunContext{
-		Context:  ctx,
-		workflow: r.workflow,
-		run:      run,
-		state:    state,
-		cl:       r.cl,
-	}, args)
+func (r *runner) run(ctx context.Context, run string, args proto.Message,state *runState ) {
+	workflowArgs := []reflect.Value{
+		reflect.ValueOf(RunContext{
+			Context:  ctx,
+			workflow: r.workflow,
+			run:      run,
+			state:    state,
+			cl:       r.cl,
+		}),
+		reflect.ValueOf(args),
+	}
+
+	reflect.ValueOf(r.workflowFunc).Call(workflowArgs)
 }
 
 type RunContext struct {
@@ -230,14 +229,13 @@ type RunContext struct {
 	cl Client
 }
 
-func (c *RunContext) ExecuteActivity(activityFunc interface{}, args proto.Message) (proto.Message, error) {
+func (c *RunContext) ExecActivity(activityFunc interface{}, args proto.Message) proto.Message {
 	activity := getFunctionName(activityFunc)
-	err := c.cl.RequestActivity(c, c.workflow, c.run, activity, args)
-	if err != nil {
-		return nil, err
-	}
+	ensure(c, func() error {
+		return c.cl.RequestActivity(c, c.workflow, c.run, activity, args)
+	})
 
-	return c.state.AwaitActivity(activity), nil
+	return c.state.AwaitActivity(activity)
 }
 
 func getFunctionName(i interface{}) string {
@@ -253,7 +251,19 @@ func getFunctionName(i interface{}) string {
 	// It is possible because nil receivers are allowed.
 	// For example:
 	// var a *Activities
-	// ExecuteActivity(ctx, a.Foo)
+	// ExecActivity(ctx, a.Foo)
 	// will call this function which is going to return "Foo"
 	return strings.TrimSuffix(shortName, "-fm")
+}
+
+func ensure(ctx context.Context, fn func() error) {
+	for {
+		err := fn()
+		if err != nil {
+			log.Error(ctx, errors.Wrap(err, "ensure"))
+			time.Sleep(time.Second)
+			continue
+		}
+		return
+	}
 }
