@@ -21,13 +21,14 @@ import (
 
 type Client interface {
 	CreateRun(ctx context.Context, workflow string, args proto.Message) error
-	RequestActivity(ctx context.Context, workflow, run string, name string, args proto.Message) error
-	CompleteActivity(ctx context.Context, workflow, run string, name string, response proto.Message) error
+	RequestActivity(ctx context.Context, workflow, run string, activity string, index int,args proto.Message) error
+	CompleteActivity(ctx context.Context, workflow, run string, activity string, index int,response proto.Message) error
 	CompleteRun(ctx context.Context, workflow, run string) error
+	ListBootstrapEvents(ctx context.Context, workflow, run string) ([]reflex.Event, error)
 	Stream(ctx context.Context, after string, opts ...reflex.StreamOption) (reflex.StreamClient, error)
 }
 
-func RegisterActivity(cl Client, cstore reflex.CursorStore, backends interface{}, activityFunc interface{}) {
+func RegisterActivity(ctx context.Context, cl Client, cstore reflex.CursorStore, backends interface{}, activityFunc interface{}) {
 	activity := getFunctionName(activityFunc)
 
 	fn := func(ctx context.Context, f fate.Fate, e *reflex.Event) error {
@@ -35,8 +36,8 @@ func RegisterActivity(cl Client, cstore reflex.CursorStore, backends interface{}
 			return nil
 		}
 
-		var id db.EventID
-		if err := json.Unmarshal([]byte(e.ForeignID), &id); err != nil {
+		id, message, err := parseEvent(e)
+		if err != nil {
 			return err
 		}
 
@@ -44,36 +45,24 @@ func RegisterActivity(cl Client, cstore reflex.CursorStore, backends interface{}
 			return nil
 		}
 
-		var d ptypes.DynamicAny
-		if len(e.MetaData) > 0 {
-			var a anypb.Any
-			if err := proto.Unmarshal(e.MetaData, &a); err != nil {
-				return errors.Wrap(err, "unmarshal proto")
-			}
-
-			if err := ptypes.UnmarshalAny(&a, &d); err != nil {
-				return errors.Wrap(err, "unmarshal anypb")
-			}
-		}
-
 		args := []reflect.Value{
 			reflect.ValueOf(ctx),
 			reflect.ValueOf(backends),
-			reflect.ValueOf(d.Message),
+			reflect.ValueOf(message),
 		}
 
 		respVals := reflect.ValueOf(activityFunc).Call(args)
 
 		resp := respVals[0].Interface().(proto.Message)
 		// TODO(corver): Handle activity errors.
-		return cl.CompleteActivity(ctx, id.Workflow, id.Run, id.Activity, resp)
+		return cl.CompleteActivity(ctx, id.Workflow, id.Run, id.Activity, id.Index, resp)
 	}
 
 	spec := reflex.NewSpec(cl.Stream, cstore, reflex.NewConsumer(activity, fn))
-	go rpatterns.RunForever(func() context.Context{ return context.Background()}, spec)
+	go rpatterns.RunForever(func() context.Context{ return ctx}, spec)
 }
 
-func RegisterWorkflow(cl Client, cstore reflex.CursorStore, workflowFunc interface{}) {
+func RegisterWorkflow(ctx context.Context, cl Client, cstore reflex.CursorStore, workflowFunc interface{}) {
 	workflow := getFunctionName(workflowFunc) // TODO(corver): Prefix service name.
 
 	// TODO(corver): Validate workflowfunc signature.
@@ -85,8 +74,9 @@ func RegisterWorkflow(cl Client, cstore reflex.CursorStore, workflowFunc interfa
 		runs:         make(map[string]*runState),
 	}
 	fn := func(ctx context.Context, f fate.Fate, e *reflex.Event) error {
-		var id db.EventID
-		if err := json.Unmarshal([]byte(e.ForeignID), &id); err != nil {
+
+		id, message, err := parseEvent(e)
+		if err != nil {
 			return err
 		}
 
@@ -94,23 +84,12 @@ func RegisterWorkflow(cl Client, cstore reflex.CursorStore, workflowFunc interfa
 			return nil
 		}
 
-		var d ptypes.DynamicAny
-		if len(e.MetaData) > 0 {
-			var a anypb.Any
-			if err := proto.Unmarshal(e.MetaData, &a); err != nil {
-				return errors.Wrap(err, "unmarshal proto")
-			}
-
-			if err := ptypes.UnmarshalAny(&a, &d); err != nil {
-				return errors.Wrap(err, "unmarshal anypb")
-			}
-		}
 
 		switch e.Type.ReflexType() {
 		case db.CreateRun.ReflexType():
-			return r.StartRun(ctx, id.Run, d.Message)
+			return r.StartRun(ctx, id.Run, message)
 		case db.ActivityResponse.ReflexType():
-			return r.RespondActivity(ctx, id.Run, id.Activity, d.Message)
+			return r.RespondActivity(ctx, id.Run, id.Activity, message, e.IDInt())
 		case db.ActivityRequest.ReflexType():
 			return nil
 		case db.CompleteRun.ReflexType():
@@ -123,35 +102,44 @@ func RegisterWorkflow(cl Client, cstore reflex.CursorStore, workflowFunc interfa
 	}
 
 	spec := reflex.NewSpec(cl.Stream, cstore, reflex.NewConsumer(workflow, fn))
-	go rpatterns.RunForever(func() context.Context{ return context.Background()}, spec)
+	go rpatterns.RunForever(func() context.Context{ return ctx}, spec)
 }
 
 type runState struct {
-	cond      *sync.Cond
-	responses map[string][]proto.Message
+	mu      sync.Mutex
+	indexes map[string]int
+	responses map[string]chan proto.Message
+	ack chan struct{}
 }
 
-func (s *runState) RespondActivity(name string, response proto.Message) {
-	s.cond.L.Lock()
-	defer s.cond.L.Unlock()
-
-	s.responses[name] = append(s.responses[name], response)
-
-	s.cond.Broadcast()
-}
-
-func (s *runState) AwaitActivity(name string) proto.Message {
-	s.cond.L.Lock()
-	defer s.cond.L.Unlock()
-
-	for len(s.responses[name]) == 0 {
-		s.cond.Wait()
+func (s *runState) RespondActivity(activity string, response proto.Message) {
+	s.mu.Lock()
+	if _, ok := s.responses[activity]; !ok {
+		s.responses[activity] = make(chan proto.Message)
 	}
+	s.mu.Unlock()
+	s.responses[activity] <- response
+	<- s.ack
+}
 
-	pop := s.responses[name][0]
-	s.responses[name] = s.responses[name][1:]
+func (s *runState) GetAndIncIndex(activity string) int {
+	s.mu.Lock()
+	defer func() {
+		s.indexes[activity]++
+		s.mu.Unlock()
+	}()
 
-	return pop
+	return s.indexes[activity]
+}
+
+func (s *runState) AwaitActivity(activity string) proto.Message {
+	s.mu.Lock()
+	if _, ok := s.responses[activity]; !ok {
+		s.responses[activity] = make(chan proto.Message)
+	}
+	s.mu.Unlock()
+	s.ack <- struct{}{}
+	return <-s.responses[activity]
 }
 
 type runner struct {
@@ -173,8 +161,9 @@ func (r *runner) StartRun(ctx context.Context, run string, args proto.Message) e
 	}
 
 	s := &runState{
-		cond:      sync.NewCond(new(sync.Mutex)),
-		responses: make(map[string][]proto.Message),
+		responses: make(map[string]chan proto.Message),
+		indexes: make(map[string]int),
+		ack: make(chan struct{}),
 	}
 	r.runs[run] = s
 
@@ -190,19 +179,60 @@ func (r *runner) StartRun(ctx context.Context, run string, args proto.Message) e
 		}
 	}()
 
+	<-s.ack
 	return nil
 }
 
-func (r *runner) RespondActivity(ctx context.Context, run string, activity string, message proto.Message) error {
+func (r *runner) bootstrapRun(ctx context.Context, run string, upTo int64) error {
+	el, err := r.cl.ListBootstrapEvents(ctx, r.workflow, run)
+	if err != nil {
+		return errors.Wrap(err, "list responses")
+	}
+
+	for i, e := range el {
+		id, message, err := parseEvent(&e)
+		if err != nil {
+			return err
+		}
+
+		if i == 0 {
+			if !reflex.IsType(e.Type, db.CreateRun) {
+				return errors.New("unexpected first event")
+			}
+
+			err := r.StartRun(ctx, run, message)
+			if err != nil {
+				return err
+			}
+
+			continue
+		}
+
+		if e.IDInt() > upTo {
+			break
+		}
+
+		err = r.RespondActivity(ctx, run, id.Activity, message, e.IDInt())
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (r *runner) RespondActivity(ctx context.Context, run string, activity string, message proto.Message, eventID int64) error {
 	r.Lock()
-	defer r.Unlock()
 
 	if _, ok := r.runs[run]; !ok {
-		return errors.New("run not found")
+		// This run was previously started and is now continuing; bootstrap it.
+		r.Unlock()
+		return r.bootstrapRun(ctx, run, eventID)
 	}
 
 	r.runs[run].RespondActivity(activity, message)
 
+	r.Unlock()
 	return nil
 }
 
@@ -231,8 +261,10 @@ type RunContext struct {
 
 func (c *RunContext) ExecActivity(activityFunc interface{}, args proto.Message) proto.Message {
 	activity := getFunctionName(activityFunc)
+	index := c.state.GetAndIncIndex(activity)
+
 	ensure(c, func() error {
-		return c.cl.RequestActivity(c, c.workflow, c.run, activity, args)
+		return c.cl.RequestActivity(c, c.workflow, c.run, activity, index, args)
 	})
 
 	return c.state.AwaitActivity(activity)
@@ -266,4 +298,27 @@ func ensure(ctx context.Context, fn func() error) {
 		}
 		return
 	}
+}
+
+func parseEvent(e *reflex.Event) (db.EventID, proto.Message, error) {
+	var id db.EventID
+	if err := json.Unmarshal([]byte(e.ForeignID), &id); err != nil {
+		return db.EventID{}, nil, err
+	}
+
+	if len(e.MetaData) == 0 {
+		return id, nil, nil
+	}
+
+		var a anypb.Any
+		if err := proto.Unmarshal(e.MetaData, &a); err != nil {
+			return db.EventID{}, nil, errors.Wrap(err, "unmarshal proto")
+		}
+
+	var d ptypes.DynamicAny
+		if err := ptypes.UnmarshalAny(&a, &d); err != nil {
+			return db.EventID{}, nil, errors.Wrap(err, "unmarshal anypb")
+		}
+
+		return id, d.Message, nil
 }

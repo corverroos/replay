@@ -20,19 +20,23 @@ type Client struct {
 }
 
 func (c *Client) CreateRun(ctx context.Context, workflow string, args proto.Message) error {
-	return db.Insert(ctx, c.dbc, workflow, randInt63(), "", db.CreateRun, args)
+	return db.Insert(ctx, c.dbc, workflow, randInt63(), "", 0, db.CreateRun, args)
 }
 
-func (c *Client) RequestActivity(ctx context.Context, workflow, run string, name string, args proto.Message) error {
-	return db.Insert(ctx, c.dbc, workflow, run, name, db.ActivityRequest, args)
+func (c *Client) RequestActivity(ctx context.Context, workflow, run string, activity string, index int, args proto.Message) error {
+	return db.Insert(ctx, c.dbc, workflow, run, activity, index, db.ActivityRequest, args)
 }
 
-func (c *Client) CompleteActivity(ctx context.Context, workflow, run string, name string, response proto.Message) error {
-	return db.Insert(ctx, c.dbc, workflow, run, name, db.ActivityResponse, response)
+func (c *Client) CompleteActivity(ctx context.Context, workflow, run string, activity string, index int, response proto.Message) error {
+	return db.Insert(ctx, c.dbc, workflow, run, activity, index, db.ActivityResponse, response)
 }
 
 func (c *Client) CompleteRun(ctx context.Context, workflow, run string) error {
-	return db.Insert(ctx, c.dbc, workflow, run, "", db.CompleteRun, nil)
+	return db.Insert(ctx, c.dbc, workflow, run, "", 0, db.CompleteRun, nil)
+}
+
+func (c *Client) ListBootstrapEvents(ctx context.Context, workflow, run string) ([]reflex.Event, error) {
+	return db.ListBootstrapEvents(ctx, c.dbc, workflow, run)
 }
 
 func (c *Client) Stream(ctx context.Context, after string, opts ...reflex.StreamOption) (reflex.StreamClient, error) {

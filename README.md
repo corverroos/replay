@@ -17,9 +17,8 @@ See [TestExample](./example/example_test.go) for an overview of the replay API.
 - The replay framework retries all activities indefinitely until no error is returned. 
 - Application logic errors should be returned in the result proto.  
 - Run are robust to all types of failure. They continue where they left off.
-- Activitites should be idempotent, since they may be called twice for the same invocation.
+- Activities should be idempotent, since they may be called twice for the same invocation.
 
 ## TODO
 
-- Add replayability: When a workflow is stopped in the middle, it should continue where it left off.
 - Add type check test.
