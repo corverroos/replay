@@ -36,7 +36,7 @@ func RegisterActivity(ctx context.Context, cl Client, cstore reflex.CursorStore,
 			return nil
 		}
 
-		id, message, err := parseEvent(e)
+		id, message, err := ParseEvent(e)
 		if err != nil {
 			return err
 		}
@@ -75,7 +75,7 @@ func RegisterWorkflow(ctx context.Context, cl Client, cstore reflex.CursorStore,
 	}
 	fn := func(ctx context.Context, f fate.Fate, e *reflex.Event) error {
 
-		id, message, err := parseEvent(e)
+		id, message, err := ParseEvent(e)
 		if err != nil {
 			return err
 		}
@@ -190,7 +190,7 @@ func (r *runner) bootstrapRun(ctx context.Context, run string, upTo int64) error
 	}
 
 	for i, e := range el {
-		id, message, err := parseEvent(&e)
+		id, message, err := ParseEvent(&e)
 		if err != nil {
 			return err
 		}
@@ -270,6 +270,17 @@ func (c *RunContext) ExecActivity(activityFunc interface{}, args proto.Message) 
 	return c.state.AwaitActivity(activity)
 }
 
+func (c *RunContext) Sleep(duration time.Duration) {
+	activity := SleepActivity
+	index := c.state.GetAndIncIndex(activity)
+
+	ensure(c, func() error {
+		return c.cl.RequestActivity(c, c.workflow, c.run, activity, index, ptypes.DurationProto(duration))
+	})
+
+	c.state.AwaitActivity(activity)
+}
+
 func getFunctionName(i interface{}) string {
 	if fullName, ok := i.(string); ok {
 		return fullName
@@ -300,7 +311,13 @@ func ensure(ctx context.Context, fn func() error) {
 	}
 }
 
-func parseEvent(e *reflex.Event) (db.EventID, proto.Message, error) {
+// TODO(corver): Move this to an internal package
+// Deprecated: Only for internal use.
+const SleepActivity = "replay_sleep"
+
+// TODO(corver): Move this to an internal package
+// Deprecated: Only for internal use.
+func ParseEvent(e *reflex.Event) (db.EventID, proto.Message, error) {
 	var id db.EventID
 	if err := json.Unmarshal([]byte(e.ForeignID), &id); err != nil {
 		return db.EventID{}, nil, err

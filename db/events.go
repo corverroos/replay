@@ -78,11 +78,6 @@ func ListBootstrapEvents(ctx context.Context, dbc *sql.DB, workflow, run string)
 	return res, rows.Err()
 }
 
-// row is a common interface for *sql.Rows and *sql.Row.
-type row interface {
-	Scan(dest ...interface{}) error
-}
-
 func Insert(ctx context.Context, dbc *sql.DB, workflow, run string, activity string, index int, typ EventType, args proto.Message) error {
 	eid, err := json.Marshal(EventID{
 		Workflow: workflow,
@@ -128,7 +123,7 @@ func Insert(ctx context.Context, dbc *sql.DB, workflow, run string, activity str
 	if _, ok := MaybeWrapErrDuplicate(err, "foreign_id_type"); ok {
 		return nil
 	} else if err != nil {
-		return err
+		return errors.Wrap(err, "insert")
 	}
 	defer notify()
 

@@ -5,6 +5,7 @@ import (
 	"github.com/corverroos/replay"
 	"github.com/corverroos/replay/client"
 	"github.com/corverroos/replay/db"
+	"github.com/corverroos/replay/sleep"
 	"github.com/golang/protobuf/proto"
 	"github.com/luno/jettison/jtest"
 	"github.com/luno/jettison/log"
@@ -12,6 +13,7 @@ import (
 	"io"
 	"sync"
 	"testing"
+	"time"
 )
 
 //go:generate protoc --go_out=plugins=grpc:. ./example.proto
@@ -40,7 +42,6 @@ func TestExample(t *testing.T) {
 
 func TestExampleReplay(t *testing.T) {
 	dbc := db.ConnectForTesting(t)
-	db.FillGaps(dbc)
 	cl := client.New(dbc)
 	ctx := context.Background()
 	cstore := new(memCursorStore)
@@ -76,6 +77,28 @@ func TestExampleReplay(t *testing.T) {
 	require.Len(t, el, 7)
 }
 
+func TestExampleSleep(t *testing.T) {
+	dbc := db.ConnectForTesting(t)
+	cl := client.New(dbc)
+	ctx := context.Background()
+	cstore := new(memCursorStore)
+	completeChan:= make(chan string)
+	tcl := &testClient{
+		Client:       cl,
+		completeChan: completeChan,
+	}
+
+	var b Backends
+	sleep.RegisterForTesting(ctx, cl, cstore, dbc)
+	replay.RegisterActivity(ctx, cl, cstore, b, PrintGreeting)
+	replay.RegisterWorkflow(ctx, tcl, cstore, SleepWorkflow)
+
+	err := cl.CreateRun(ctx, "SleepWorkflow", new(Empty))
+	jtest.RequireNil(t, err)
+
+	<-completeChan
+}
+
 type Backends struct{}
 
 func GreetingWorkflow(ctx replay.RunContext, name *String) {
@@ -84,6 +107,14 @@ func GreetingWorkflow(ctx replay.RunContext, name *String) {
 	}
 
 	ctx.ExecActivity(PrintGreeting, name)
+}
+
+func SleepWorkflow(ctx replay.RunContext, _ *Empty){
+	for i := 0; i < 10; i++ {
+		ctx.Sleep(time.Hour*24*365)
+	}
+
+	ctx.ExecActivity(PrintGreeting, &String{Value: "sleepy head"})
 }
 
 func EnrichGreeting(ctx context.Context, b Backends, msg *String) (*String, error) {
