@@ -21,9 +21,10 @@ See [TestExample](./example/example_test.go) for an overview of the replay API.
 - An async activity is similar to the golang function definition: `func doSomething(context.Context, Backends, token, proto.Message) error`
 - Async activities are completed by calling `replay.Client.CompleteAsyncActivity(ctx, token, proto.Message)`
 - An async activity returns a `Future` to the workflow logic.
-- `Await` either returns the result or false on timeout. It may be called again after timeout.
+- `Await(future)` either returns the result or false on timeout. It may be called again after timeout.
 - Async activities are handy for joining with an external processes.
 
 ## TODO
 
 - Add type check test.
+- Add CancelRun method to client API, which causes workflow thread to panic to return early.
