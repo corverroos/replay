@@ -44,16 +44,16 @@ func (e EventType) ReflexType() int {
 }
 
 const (
-	CreateRun EventType = 1
-	CompleteRun EventType = 2
-	FailRun EventType = 3
-	ActivityRequest EventType = 4
+	CreateRun        EventType = 1
+	CompleteRun      EventType = 2
+	FailRun          EventType = 3
+	ActivityRequest  EventType = 4
 	ActivityResponse EventType = 5
 )
 
 func ListBootstrapEvents(ctx context.Context, dbc *sql.DB, workflow, run string) ([]reflex.Event, error) {
-	rows, err := dbc.QueryContext(ctx, "select id, foreign_id, type, timestamp, metadata " +
-		"from events where workflow=? and run=? and (type=? or type=?)", workflow, run, CreateRun, ActivityResponse)
+	rows, err := dbc.QueryContext(ctx, "select id, foreign_id, type, timestamp, metadata "+
+		"from events where workflow=? and run=? and (type=? or type=?) order by id asc", workflow, run, CreateRun, ActivityResponse)
 	if err != nil {
 		return nil, err
 	}
@@ -62,7 +62,7 @@ func ListBootstrapEvents(ctx context.Context, dbc *sql.DB, workflow, run string)
 	var res []reflex.Event
 	for rows.Next() {
 		var (
-			e reflex.Event
+			e   reflex.Event
 			typ int
 		)
 
@@ -83,7 +83,7 @@ func Insert(ctx context.Context, dbc *sql.DB, workflow, run string, activity str
 		Workflow: workflow,
 		Run:      run,
 		Activity: activity,
-		Index: index,
+		Index:    index,
 	})
 	if err != nil {
 		return err
@@ -110,7 +110,7 @@ func Insert(ctx context.Context, dbc *sql.DB, workflow, run string, activity str
 
 	// Do lookup to avoid creating tons of gaps when replaying long running runs.
 	var exists int
-	err = tx.QueryRowContext(ctx, "select exists(" +
+	err = tx.QueryRowContext(ctx, "select exists("+
 		"select 1 from events where foreign_id = ? and type = ?)", string(eid), typ).
 		Scan(&exists)
 	if err != nil {
@@ -132,13 +132,13 @@ func Insert(ctx context.Context, dbc *sql.DB, workflow, run string, activity str
 
 type EventID struct {
 	Workflow string
-	Run string
+	Run      string
 	Activity string `json:"activity,omitempty"`
-	Index int
+	Index    int
 }
 
-func inserter (ctx context.Context, tx *sql.Tx,
-foreignID string, typ reflex.EventType, metadata []byte) error {
+func inserter(ctx context.Context, tx *sql.Tx,
+	foreignID string, typ reflex.EventType, metadata []byte) error {
 	var eid EventID
 	if err := json.Unmarshal([]byte(foreignID), &eid); err != nil {
 		return errors.Wrap(err, "insert foreign id")
@@ -150,7 +150,7 @@ foreignID string, typ reflex.EventType, metadata []byte) error {
 		run.Valid = true
 	}
 
-	_, err := tx.ExecContext(ctx, "insert into events set foreign_id=?, workflow=?, run=?, " +
+	_, err := tx.ExecContext(ctx, "insert into events set foreign_id=?, workflow=?, run=?, "+
 		"timestamp=now(3), type=?, metadata=?", foreignID, eid.Workflow, run, typ, metadata)
 	return err
 }
