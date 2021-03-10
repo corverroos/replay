@@ -21,6 +21,7 @@ CREATE TABLE sleeps (
   created_at DATETIME(3) NOT NULL,
   complete_at DATETIME(3) NOT NULL,
   completed BOOL NOT NULL,
+  async_token VARCHAR(255),
 
   PRIMARY KEY (id),
   UNIQUE foreign_id (foreign_id),

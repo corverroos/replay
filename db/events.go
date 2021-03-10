@@ -8,6 +8,7 @@ import (
 	"github.com/golang/protobuf/ptypes"
 	"github.com/luno/jettison/errors"
 	"testing"
+	"time"
 
 	"github.com/luno/reflex"
 	"github.com/luno/reflex/rsql"
@@ -18,6 +19,7 @@ var events = rsql.NewEventsTable("events",
 	rsql.WithEventsInMemNotifier(),
 	rsql.WithEventMetadataField("metadata"),
 	rsql.WithEventsInserter(inserter),
+	rsql.WithEventsBackoff(time.Millisecond*100),
 )
 
 // ToStream returns a reflex stream for the events.
@@ -49,6 +51,8 @@ const (
 	FailRun          EventType = 3
 	ActivityRequest  EventType = 4
 	ActivityResponse EventType = 5
+	AsyncActivityRequest  EventType = 6
+	AsyncActivityResponse EventType = 7
 )
 
 func ListBootstrapEvents(ctx context.Context, dbc *sql.DB, workflow, run string) ([]reflex.Event, error) {
@@ -78,7 +82,7 @@ func ListBootstrapEvents(ctx context.Context, dbc *sql.DB, workflow, run string)
 	return res, rows.Err()
 }
 
-func Insert(ctx context.Context, dbc *sql.DB, workflow, run string, activity string, index int, typ EventType, args proto.Message) error {
+func Insert(ctx context.Context, dbc *sql.DB, workflow, run string, activity string, index int, typ EventType, message proto.Message) error {
 	eid, err := json.Marshal(EventID{
 		Workflow: workflow,
 		Run:      run,
@@ -90,8 +94,8 @@ func Insert(ctx context.Context, dbc *sql.DB, workflow, run string, activity str
 	}
 
 	var meta []byte
-	if args != nil {
-		any, err := ptypes.MarshalAny(args)
+	if message != nil {
+		any, err := ptypes.MarshalAny(message)
 		if err != nil {
 			return err
 		}

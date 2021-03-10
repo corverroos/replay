@@ -18,6 +18,11 @@ See [TestExample](./example/example_test.go) for an overview of the replay API.
 - Application logic errors should be returned in the result proto.  
 - Run are robust to all types of failure. They continue where they left off.
 - Activities should be idempotent, since they may be called twice for the same invocation.
+- An async activity is similar to the golang function definition: `func doSomething(context.Context, Backends, token, proto.Message) error`
+- Async activities are completed by calling `replay.Client.CompleteAsyncActivity(ctx, token, proto.Message)`
+- An async activity returns a `Future` to the workflow logic.
+- `Await` either returns the result or false on timeout. It may be called again after timeout.
+- Async activities are handy for joining with an external processes.
 
 ## TODO
 

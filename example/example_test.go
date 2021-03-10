@@ -9,8 +9,10 @@ import (
 	"github.com/golang/protobuf/proto"
 	"github.com/luno/jettison/jtest"
 	"github.com/luno/jettison/log"
+	"github.com/pkg/errors"
 	"github.com/stretchr/testify/require"
 	"io"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -99,11 +101,49 @@ func TestExampleSleep(t *testing.T) {
 	<-completeChan
 }
 
-type Backends struct{}
+
+func TestExampleAsync(t *testing.T) {
+	dbc := db.ConnectForTesting(t)
+	cl := client.New(dbc)
+	ctx := context.Background()
+	cstore := new(memCursorStore)
+	completeChan:= make(chan string)
+	tcl := &testClient{
+		Client:       cl,
+		completeChan: completeChan,
+	}
+
+	b :=Backends{Replay: cl}
+	sleep.Register(ctx, cl, cstore, dbc)
+	replay.RegisterActivity(ctx, cl, cstore, b, PrintGreeting)
+	replay.RegisterAsyncActivity(ctx, cl, cstore, b, AsyncEnrich)
+	replay.RegisterWorkflow(ctx, tcl, cstore, AsyncGreetingWorkflow)
+
+	err := cl.RunWorkflow(ctx, "AsyncGreetingWorkflow", t.Name(), &String{Value: "async"})
+	jtest.RequireNil(t, err)
+
+	<-completeChan
+}
+
+type Backends struct{
+	Replay replay.Client
+}
 
 func GreetingWorkflow(ctx replay.RunContext, name *String) {
 	for i := 0; i < 5; i++ {
 		name = ctx.ExecActivity(EnrichGreeting, name).(*String)
+	}
+
+	ctx.ExecActivity(PrintGreeting, name)
+}
+
+func AsyncGreetingWorkflow(ctx replay.RunContext, name *String) {
+	for i := 0; i < 5; i++ {
+		future := ctx.AsyncActivity(AsyncEnrich, name)
+		resp, ok := ctx.Await(future, time.Second)
+		if ok {
+			name = resp.(*String)
+		}
 	}
 
 	ctx.ExecActivity(PrintGreeting, name)
@@ -124,6 +164,20 @@ func EnrichGreeting(ctx context.Context, b Backends, msg *String) (*String, erro
 func PrintGreeting(ctx context.Context, b Backends, msg *String) (*Empty, error) {
 	log.Info(ctx, "Hello "+msg.Value)
 	return &Empty{}, nil
+}
+
+func AsyncEnrich(ctx context.Context, b Backends, token string, msg *String) error {
+	go func() {
+		if strings.Contains(msg.Value, "[[[[") {
+			return
+		}
+		time.Sleep(time.Millisecond*100)
+		err := b.Replay.CompleteAsyncActivity(ctx, token, &String{Value: "[" + msg.Value + "]"})
+		if err != nil {
+			log.Error(ctx, errors.Wrap(err, "complete async"))
+		}
+	}()
+	return nil
 }
 
 type testClient struct {

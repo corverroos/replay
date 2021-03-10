@@ -3,11 +3,16 @@ package client
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
+	"github.com/corverroos/replay"
 	"github.com/corverroos/replay/db"
+	"github.com/corverroos/replay/internal"
 	"github.com/golang/protobuf/proto"
 	"github.com/luno/jettison/errors"
 	"github.com/luno/reflex"
 )
+
+var _ replay.Client = (*Client)(nil)
 
 func New(dbc *sql.DB) *Client {
 	return &Client{dbc: dbc}
@@ -21,12 +26,30 @@ func (c *Client) RunWorkflow(ctx context.Context, workflow, run string, args pro
 	return db.Insert(ctx, c.dbc, workflow, run, "", 0, db.CreateRun, args)
 }
 
-func (c *Client) RequestActivity(ctx context.Context, workflow, run string, activity string, index int, args proto.Message) error {
-	return swallowErrDup(db.Insert(ctx, c.dbc, workflow, run, activity, index, db.ActivityRequest, args))
+func (c *Client) RequestActivity(ctx context.Context, workflow, run string, activity string, index int, message proto.Message) error {
+	return swallowErrDup(db.Insert(ctx, c.dbc, workflow, run, activity, index, db.ActivityRequest, message))
 }
 
-func (c *Client) CompleteActivity(ctx context.Context, workflow, run string, activity string, index int, response proto.Message) error {
-	return swallowErrDup(db.Insert(ctx, c.dbc, workflow, run, activity, index, db.ActivityResponse, response))
+func (c *Client) CompleteActivity(ctx context.Context, workflow, run string, activity string, index int, message proto.Message) error {
+	return swallowErrDup(db.Insert(ctx, c.dbc, workflow, run, activity, index, db.ActivityResponse, message))
+}
+
+func (c *Client) RequestAsyncActivity(ctx context.Context, workflow, run string, activity string, index int, message proto.Message) error {
+	return swallowErrDup(db.Insert(ctx, c.dbc, workflow, run, activity, index, db.AsyncActivityRequest, message))
+}
+
+func (c *Client) CompleteAsyncActivity(ctx context.Context, token string , message proto.Message) error {
+	foreignID, err := internal.UnmarshalAsyncToken(token)
+	if err != nil {
+		return err
+	}
+
+	var id db.EventID
+	if err := json.Unmarshal([]byte(foreignID), &id); err != nil {
+		return err
+	}
+
+	return db.Insert(ctx, c.dbc, id.Workflow, id.Run, id.Activity, id.Index, db.AsyncActivityResponse, message)
 }
 
 func (c *Client) CompleteRun(ctx context.Context, workflow, run string) error {
