@@ -121,7 +121,7 @@ func Insert(ctx context.Context, dbc *sql.DB, workflow, run string, activity str
 
 	notify, err := events.InsertWithMetadata(ctx, tx, string(eid), typ, meta)
 	if _, ok := MaybeWrapErrDuplicate(err, "foreign_id_type"); ok {
-		return nil
+		return err
 	} else if err != nil {
 		return errors.Wrap(err, "insert")
 	}

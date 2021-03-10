@@ -34,7 +34,7 @@ func TestExample(t *testing.T) {
 	replay.RegisterActivity(ctx, cl, cstore, b, PrintGreeting)
 	replay.RegisterWorkflow(ctx, tcl, cstore, GreetingWorkflow)
 
-	err := cl.CreateRun(context.Background(), "GreetingWorkflow", &String{Value: "World"})
+	err := cl.RunWorkflow(context.Background(), "GreetingWorkflow", t.Name(), &String{Value: "World"})
 	jtest.RequireNil(t, err)
 
 	<-completeChan
@@ -58,7 +58,7 @@ func TestExampleReplay(t *testing.T) {
 	replay.RegisterActivity(ctx,cl, cstore,  b, PrintGreeting)
 	replay.RegisterWorkflow(ctx,tcl1, cstore, GreetingWorkflow) // This workflow will block right before ctx.ExecActivity(PrintGreeting, name)
 
-	err := cl.CreateRun(context.Background(), "GreetingWorkflow", &String{Value: "World"})
+	err := cl.RunWorkflow(context.Background(), "GreetingWorkflow", t.Name(), &String{Value: "World"})
 	jtest.RequireNil(t, err)
 
 	activity := <- errsChan
@@ -93,7 +93,7 @@ func TestExampleSleep(t *testing.T) {
 	replay.RegisterActivity(ctx, cl, cstore, b, PrintGreeting)
 	replay.RegisterWorkflow(ctx, tcl, cstore, SleepWorkflow)
 
-	err := cl.CreateRun(ctx, "SleepWorkflow", new(Empty))
+	err := cl.RunWorkflow(ctx, "SleepWorkflow", t.Name(), new(Empty))
 	jtest.RequireNil(t, err)
 
 	<-completeChan

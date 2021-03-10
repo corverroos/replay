@@ -21,7 +21,7 @@ import (
 )
 
 type Client interface {
-	CreateRun(ctx context.Context, workflow string, args proto.Message) error
+	RunWorkflow(ctx context.Context, workflow , run string, args proto.Message,) error
 	RequestActivity(ctx context.Context, workflow, run string, activity string, index int, args proto.Message) error
 	CompleteActivity(ctx context.Context, workflow, run string, activity string, index int, response proto.Message) error
 	CompleteRun(ctx context.Context, workflow, run string) error
