@@ -3,9 +3,11 @@ package client
 import (
 	"context"
 	"database/sql"
+
 	"github.com/corverroos/replay"
 	"github.com/corverroos/replay/db"
 	"github.com/corverroos/replay/internal"
+	"github.com/corverroos/replay/signal"
 	"github.com/golang/protobuf/proto"
 	"github.com/luno/jettison/errors"
 	"github.com/luno/reflex"
@@ -23,6 +25,10 @@ type Client struct {
 
 func (c *Client) RunWorkflow(ctx context.Context, workflow, run string, args proto.Message) error {
 	return db.Insert(ctx, c.dbc, shortKey(workflow, run), db.CreateRun, args)
+}
+
+func (c *Client) SignalRun(ctx context.Context, workflow, run string, s replay.Signal, message proto.Message, extID string) error {
+	return signal.Insert(ctx, c.dbc, workflow, run, s, message, extID)
 }
 
 func (c *Client) RequestActivity(ctx context.Context, key string, message proto.Message) error {
@@ -45,7 +51,7 @@ func (c *Client) Stream(ctx context.Context, after string, opts ...reflex.Stream
 	return db.ToStream(c.dbc)(ctx, after, opts...)
 }
 
-func shortKey(workflow , run string) string {
+func shortKey(workflow, run string) string {
 	return internal.Key{Workflow: workflow, Run: run}.Encode()
 }
 

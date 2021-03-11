@@ -5,7 +5,6 @@ go 1.15
 require (
 	github.com/corverroos/truss v0.0.0-20200921045746-e25f1f150ad4
 	github.com/go-sql-driver/mysql v1.5.0
-	github.com/gogo/protobuf v1.3.1
 	github.com/golang/protobuf v1.4.3
 	github.com/luno/fate v0.0.0-20191017091315-567fa9070f1c
 	github.com/luno/jettison v0.0.0-20210218093327-95083f929b49

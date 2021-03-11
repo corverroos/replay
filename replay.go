@@ -3,6 +3,12 @@ package replay
 import (
 	"context"
 	"fmt"
+	"reflect"
+	"runtime"
+	"strings"
+	"sync"
+	"time"
+
 	"github.com/corverroos/replay/db"
 	"github.com/corverroos/replay/internal"
 	"github.com/golang/protobuf/proto"
@@ -13,21 +19,22 @@ import (
 	"github.com/luno/jettison/log"
 	"github.com/luno/reflex"
 	"github.com/luno/reflex/rpatterns"
-	"reflect"
-	"runtime"
-	"strings"
-	"sync"
-	"time"
 )
 
 type Client interface {
-	RunWorkflow(ctx context.Context, workflow , run string, args proto.Message,) error
+	RunWorkflow(ctx context.Context, workflow, run string, message proto.Message) error
+	SignalRun(ctx context.Context, workflow, run string, s Signal, message proto.Message, extID string) error
 
 	RequestActivity(ctx context.Context, key string, message proto.Message) error
 	CompleteActivity(ctx context.Context, key string, message proto.Message) error
 	CompleteRun(ctx context.Context, workflow, run string) error
 	ListBootstrapEvents(ctx context.Context, workflow, run string) ([]reflex.Event, error)
 	Stream(ctx context.Context, after string, opts ...reflex.StreamOption) (reflex.StreamClient, error)
+}
+
+type Signal interface {
+	SignalType() int
+	MessageType() proto.Message
 }
 
 func RegisterActivity(ctx context.Context, cl Client, cstore reflex.CursorStore, backends interface{}, activityFunc interface{}) {
@@ -63,7 +70,6 @@ func RegisterActivity(ctx context.Context, cl Client, cstore reflex.CursorStore,
 	spec := reflex.NewSpec(cl.Stream, cstore, reflex.NewConsumer(activity, fn))
 	go rpatterns.RunForever(func() context.Context { return ctx }, spec)
 }
-
 
 func RegisterWorkflow(ctx context.Context, cl Client, cstore reflex.CursorStore, workflowFunc interface{}) {
 	workflow := getFunctionName(workflowFunc) // TODO(corver): Prefix service name.
@@ -129,7 +135,7 @@ func (s *runState) RespondActivity(e *reflex.Event, key internal.Key, message pr
 	<-s.ack
 }
 
-func (s *runState) GetAndIncIndex(activity string) int {
+func (s *runState) GetAndInc(activity string) int {
 	s.mu.Lock()
 	defer func() {
 		s.indexes[activity]++
@@ -273,7 +279,7 @@ type RunContext struct {
 
 func (c *RunContext) ExecActivity(activityFunc interface{}, args proto.Message) proto.Message {
 	activity := getFunctionName(activityFunc)
-	index := c.state.GetAndIncIndex(activity)
+	index := c.state.GetAndInc(activity)
 	key := internal.Key{
 		Workflow: c.workflow,
 		Run:      c.run,
@@ -290,9 +296,36 @@ func (c *RunContext) ExecActivity(activityFunc interface{}, args proto.Message) 
 	return res.message
 }
 
+func (c *RunContext) AwaitSignal(s Signal, duration time.Duration) (proto.Message, bool) {
+	activity := internal.SignalActivity
+	seq := internal.SignalSequence{
+		SignalType: s.SignalType(),
+		Index:      c.state.GetAndInc(fmt.Sprintf("%s:%d", activity, s.SignalType())),
+	}
+
+	key := internal.Key{
+		Workflow: c.workflow,
+		Run:      c.run,
+		Activity: activity,
+		Sequence: seq.Encode(),
+	}
+	ensure(c, func() error {
+		return c.cl.RequestActivity(c, key.Encode(), &internal.SleepRequest{
+			Duration: ptypes.DurationProto(duration),
+		})
+	})
+
+	res := c.state.AwaitActivity(key)
+	c.lastEvent = res.event
+	if _, ok := res.message.(*internal.SleepDone); ok {
+		return nil, false
+	}
+	return res.message, true
+}
+
 func (c *RunContext) Sleep(duration time.Duration) {
 	activity := internal.SleepActivity
-	index := c.state.GetAndIncIndex(activity)
+	index := c.state.GetAndInc(activity)
 	key := internal.Key{
 		Workflow: c.workflow,
 		Run:      c.run,
@@ -302,7 +335,7 @@ func (c *RunContext) Sleep(duration time.Duration) {
 
 	ensure(c, func() error {
 		return c.cl.RequestActivity(c, key.Encode(), &internal.SleepRequest{
-			Duration:             ptypes.DurationProto(duration),
+			Duration: ptypes.DurationProto(duration),
 		})
 	})
 
@@ -314,6 +347,9 @@ func (c *RunContext) CreateEvent() *reflex.Event {
 }
 func (c *RunContext) LastEvent() *reflex.Event {
 	return c.lastEvent
+}
+func (c *RunContext) Run() string {
+	return c.run
 }
 
 func getFunctionName(i interface{}) string {

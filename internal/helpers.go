@@ -1,16 +1,20 @@
 package internal
 
 import (
+	"fmt"
+	"path"
+	"strconv"
+	"strings"
+
 	"github.com/golang/protobuf/proto"
 	"github.com/golang/protobuf/ptypes"
 	"github.com/luno/jettison/errors"
 	"github.com/luno/reflex"
 	"google.golang.org/protobuf/types/known/anypb"
-	"path"
-	"strings"
 )
 
 const SleepActivity = "replay_sleep"
+const SignalActivity = "replay_signal"
 
 func ParseEvent(e *reflex.Event) (Key, proto.Message, error) {
 	k, err := DecodeKey(e.ForeignID)
@@ -35,9 +39,37 @@ func ParseEvent(e *reflex.Event) (Key, proto.Message, error) {
 	return k, d.Message, nil
 }
 
+type SignalSequence struct {
+	SignalType int
+	Index      int
+}
+
+func (s SignalSequence) Encode() string {
+	return fmt.Sprintf("%d:%d", s.SignalType, s.Index)
+}
+
+func DecodeSignalSequence(sequence string) (SignalSequence, error) {
+	split := strings.Split(sequence, ":")
+	if len(split) < 2 {
+		return SignalSequence{}, errors.New("invalid sequence")
+	}
+	typ, err := strconv.Atoi(split[0])
+	if err != nil {
+		return SignalSequence{}, errors.New("invalid sequence")
+	}
+	index, err := strconv.Atoi(split[1])
+	if err != nil {
+		return SignalSequence{}, errors.New("invalid sequence")
+	}
+	return SignalSequence{
+		SignalType: typ,
+		Index:      index,
+	}, nil
+}
+
 type Key struct {
 	Workflow string
-	Run string
+	Run      string
 	Activity string
 	Sequence string
 }
@@ -48,7 +80,7 @@ func (k Key) Encode() string {
 
 func DecodeKey(key string) (Key, error) {
 	split := strings.Split(key, "/")
-	if len(split) < 1 {
+	if len(split) < 2 {
 		return Key{}, errors.New("invalid key")
 	}
 	var k Key
