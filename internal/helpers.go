@@ -1,50 +1,67 @@
 package internal
 
 import (
-	"encoding/base64"
-	"encoding/json"
-	"github.com/corverroos/replay/db"
 	"github.com/golang/protobuf/proto"
 	"github.com/golang/protobuf/ptypes"
 	"github.com/luno/jettison/errors"
 	"github.com/luno/reflex"
 	"google.golang.org/protobuf/types/known/anypb"
+	"path"
+	"strings"
 )
 
 const SleepActivity = "replay_sleep"
 
-func ParseEvent(e *reflex.Event) (db.EventID, proto.Message, error) {
-	var id db.EventID
-	if err := json.Unmarshal([]byte(e.ForeignID), &id); err != nil {
-		return db.EventID{}, nil, err
+func ParseEvent(e *reflex.Event) (Key, proto.Message, error) {
+	k, err := DecodeKey(e.ForeignID)
+	if err != nil {
+		return Key{}, nil, err
 	}
 
 	if len(e.MetaData) == 0 {
-		return id, nil, nil
+		return k, nil, nil
 	}
 
 	var a anypb.Any
 	if err := proto.Unmarshal(e.MetaData, &a); err != nil {
-		return db.EventID{}, nil, errors.Wrap(err, "unmarshal proto")
+		return Key{}, nil, errors.Wrap(err, "unmarshal proto")
 	}
 
 	var d ptypes.DynamicAny
 	if err := ptypes.UnmarshalAny(&a, &d); err != nil {
-		return db.EventID{}, nil, errors.Wrap(err, "unmarshal anypb")
+		return Key{}, nil, errors.Wrap(err, "unmarshal anypb")
 	}
 
-	return id, d.Message, nil
+	return k, d.Message, nil
 }
 
-func MarshalAsyncToken(foreignID string) string {
-	return base64.URLEncoding.EncodeToString([]byte(foreignID))
+type Key struct {
+	Workflow string
+	Run string
+	Activity string
+	Sequence string
 }
 
-func UnmarshalAsyncToken(token string) (foreignID string, err error) {
-	b, err := base64.URLEncoding.DecodeString(token)
-	if err != nil {
-		return "", err
+func (k Key) Encode() string {
+	return path.Join(k.Workflow, k.Run, k.Activity, k.Sequence)
+}
+
+func DecodeKey(key string) (Key, error) {
+	split := strings.Split(key, "/")
+	if len(split) < 1 {
+		return Key{}, errors.New("invalid key")
 	}
-	return string(b), err
+	var k Key
+	for i, s := range split {
+		if i == 0 {
+			k.Workflow = s
+		} else if i == 1 {
+			k.Run = s
+		} else if i == 2 {
+			k.Activity = s
+		} else {
+			k.Sequence = s
+		}
+	}
+	return k, nil
 }
-

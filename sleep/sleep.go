@@ -3,7 +3,6 @@ package sleep
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"github.com/corverroos/replay"
 	"github.com/corverroos/replay/db"
 	"github.com/corverroos/replay/internal"
@@ -31,22 +30,21 @@ func Register(ctx context.Context, cl replay.Client, cstore reflex.CursorStore, 
 			return nil
 		}
 
-		id, message, err := internal.ParseEvent(e)
+		key, message, err := internal.ParseEvent(e)
 		if err != nil {
 			return err
 		}
 
-		if id.Activity != internal.SleepActivity {
+		if key.Activity != internal.SleepActivity {
 			return nil
 		}
-
 
 		req := message.(*internal.SleepRequest)
 		completeAt := time.Now().Add(time.Duration(req.Duration.Seconds) * time.Second)
 
-		_, err = dbc.ExecContext(ctx, "insert into sleeps set foreign_id=?, "+
-			"created_at=?, complete_at=?, completed=false, async_token=?", e.ForeignID, time.Now(), completeAt, req.AsyncToken)
-		if _, ok := db.MaybeWrapErrDuplicate(err, "foreign_id"); ok {
+		_, err = dbc.ExecContext(ctx, "insert into sleeps set `key`=?, "+
+			"created_at=?, complete_at=?, completed=false", e.ForeignID, time.Now(), completeAt)
+		if _, ok := db.MaybeWrapErrDuplicate(err, "by_key"); ok {
 			return nil
 		} else if err != nil {
 			return err
@@ -81,21 +79,9 @@ func completeSleepsOnce(ctx context.Context, cl replay.Client, dbc *sql.DB) erro
 			return nil
 		}
 
-		var id db.EventID
-		if err := json.Unmarshal([]byte(s.ForeignID), &id); err != nil {
+		err := cl.CompleteActivity(ctx, s.Key, &internal.SleepDone{})
+		if err != nil {
 			return err
-		}
-
-		if s.AsyncToken != "" {
-			err := cl.CompleteAsyncActivity(ctx, s.AsyncToken, &internal.SleepDone{})
-			if err != nil {
-				return err
-			}
-		} else {
-			err := cl.CompleteActivity(ctx, id.Workflow, id.Run, id.Activity, id.Index, &internal.SleepDone{})
-			if err != nil {
-				return err
-			}
 		}
 	}
 
@@ -109,14 +95,13 @@ var shouldComplete = func(completeAt time.Time) bool {
 
 type sleep struct {
 	ID         int
-	ForeignID  string
+	Key  string
 	CreatedAt  time.Time
 	CompleteAt time.Time
-	AsyncToken string
 }
 
 func listToComplete(ctx context.Context, dbc *sql.DB) ([]sleep, error) {
-	rows, err := dbc.QueryContext(ctx, "select id, foreign_id, created_at, complete_at, async_token "+
+	rows, err := dbc.QueryContext(ctx, "select id, `key`, created_at, complete_at "+
 		"from sleeps where completed=false order by complete_at asc")
 	if err != nil {
 		return nil, err
@@ -127,7 +112,7 @@ func listToComplete(ctx context.Context, dbc *sql.DB) ([]sleep, error) {
 	for rows.Next() {
 		var s sleep
 
-		err := rows.Scan(&s.ID, &s.ForeignID, &s.CreatedAt, &s.CompleteAt, &s.AsyncToken)
+		err := rows.Scan(&s.ID, &s.Key, &s.CreatedAt, &s.CompleteAt)
 		if err != nil {
 			return nil, err
 		}

@@ -8,5 +8,4 @@ message SleepDone{}
 
 message SleepRequest{
   google.protobuf.Duration duration = 1;
-  string async_token = 2;
 }

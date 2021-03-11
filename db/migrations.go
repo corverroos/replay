@@ -3,7 +3,7 @@ package db
 var migrations = []string{`
 CREATE TABLE events (
   id BIGINT NOT NULL AUTO_INCREMENT,
-  foreign_id VARCHAR(255) NOT NULL,
+  `+"`key`"+` VARCHAR(255) NOT NULL,
   workflow VARCHAR(255) NOT NULL DEFAULT "",
   run VARCHAR(255),
   type INT NOT NULL,
@@ -11,20 +11,19 @@ CREATE TABLE events (
   metadata MEDIUMBLOB,
 
   PRIMARY KEY (id),
-  UNIQUE foreign_id_type (foreign_id, type),
-  INDEX (workflow, run, type)
+  UNIQUE by_type_key (type, `+"`key`"+`),
+  INDEX (type, workflow, run)
 );
 `,`
 CREATE TABLE sleeps (
   id BIGINT NOT NULL AUTO_INCREMENT,
-  foreign_id VARCHAR(255) NOT NULL,
+  `+"`key`"+` VARCHAR(255) NOT NULL,
   created_at DATETIME(3) NOT NULL,
   complete_at DATETIME(3) NOT NULL,
   completed BOOL NOT NULL,
-  async_token VARCHAR(255),
 
   PRIMARY KEY (id),
-  UNIQUE foreign_id (foreign_id),
+  UNIQUE by_key (`+"`key`"+`),
   INDEX (completed, complete_at)
 );
 `,

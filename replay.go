@@ -2,7 +2,7 @@ package replay
 
 import (
 	"context"
-	"encoding/json"
+	"fmt"
 	"github.com/corverroos/replay/db"
 	"github.com/corverroos/replay/internal"
 	"github.com/golang/protobuf/proto"
@@ -22,11 +22,9 @@ import (
 
 type Client interface {
 	RunWorkflow(ctx context.Context, workflow , run string, args proto.Message,) error
-	CompleteAsyncActivity(ctx context.Context, token string, message proto.Message) error
 
-	RequestActivity(ctx context.Context, workflow, run string, activity string, index int, message proto.Message) error
-	CompleteActivity(ctx context.Context, workflow, run string, activity string, index int, message proto.Message) error
-	RequestAsyncActivity(ctx context.Context, workflow, run string, activity string, index int, message proto.Message) error
+	RequestActivity(ctx context.Context, key string, message proto.Message) error
+	CompleteActivity(ctx context.Context, key string, message proto.Message) error
 	CompleteRun(ctx context.Context, workflow, run string) error
 	ListBootstrapEvents(ctx context.Context, workflow, run string) ([]reflex.Event, error)
 	Stream(ctx context.Context, after string, opts ...reflex.StreamOption) (reflex.StreamClient, error)
@@ -40,12 +38,12 @@ func RegisterActivity(ctx context.Context, cl Client, cstore reflex.CursorStore,
 			return nil
 		}
 
-		id, message, err := internal.ParseEvent(e)
+		key, message, err := internal.ParseEvent(e)
 		if err != nil {
 			return err
 		}
 
-		if id.Activity != activity {
+		if key.Activity != activity {
 			return nil
 		}
 
@@ -59,46 +57,13 @@ func RegisterActivity(ctx context.Context, cl Client, cstore reflex.CursorStore,
 
 		resp := respVals[0].Interface().(proto.Message)
 		// TODO(corver): Handle activity errors.
-		return cl.CompleteActivity(ctx, id.Workflow, id.Run, id.Activity, id.Index, resp)
+		return cl.CompleteActivity(ctx, e.ForeignID, resp)
 	}
 
 	spec := reflex.NewSpec(cl.Stream, cstore, reflex.NewConsumer(activity, fn))
 	go rpatterns.RunForever(func() context.Context { return ctx }, spec)
 }
 
-func RegisterAsyncActivity(ctx context.Context, cl Client, cstore reflex.CursorStore, backends interface{}, activityFunc interface{}) {
-	activity := getFunctionName(activityFunc)
-
-	fn := func(ctx context.Context, f fate.Fate, e *reflex.Event) error {
-		if !reflex.IsType(e.Type, db.AsyncActivityRequest) {
-			return nil
-		}
-
-		id, message, err := internal.ParseEvent(e)
-		if err != nil {
-			return err
-		}
-
-		if id.Activity != activity {
-			return nil
-		}
-
-		args := []reflect.Value{
-			reflect.ValueOf(ctx),
-			reflect.ValueOf(backends),
-			reflect.ValueOf(internal.MarshalAsyncToken(e.ForeignID)),
-			reflect.ValueOf(message),
-		}
-
-		reflect.ValueOf(activityFunc).Call(args)
-
-		// TODO(corver): Handle activity errors.
-		return nil
-	}
-
-	spec := reflex.NewSpec(cl.Stream, cstore, reflex.NewConsumer(activity, fn))
-	go rpatterns.RunForever(func() context.Context { return ctx }, spec)
-}
 
 func RegisterWorkflow(ctx context.Context, cl Client, cstore reflex.CursorStore, workflowFunc interface{}) {
 	workflow := getFunctionName(workflowFunc) // TODO(corver): Prefix service name.
@@ -113,23 +78,21 @@ func RegisterWorkflow(ctx context.Context, cl Client, cstore reflex.CursorStore,
 	}
 	fn := func(ctx context.Context, f fate.Fate, e *reflex.Event) error {
 
-		id, message, err := internal.ParseEvent(e)
+		key, message, err := internal.ParseEvent(e)
 		if err != nil {
 			return err
 		}
 
-		if id.Workflow != workflow {
+		if key.Workflow != workflow {
 			return nil
 		}
 
 		switch e.Type.ReflexType() {
 		case db.CreateRun.ReflexType():
-			return r.StartRun(ctx, e, id.Run, message)
-		case db.ActivityResponse.ReflexType(), db.AsyncActivityResponse.ReflexType():
-			return r.RespondActivity(ctx, e, id.Run, id.Activity, id.Index, message)
+			return r.StartRun(ctx, e, key, message)
+		case db.ActivityResponse.ReflexType():
+			return r.RespondActivity(ctx, e, key, message)
 		case db.ActivityRequest.ReflexType():
-			return nil
-		case db.AsyncActivityRequest.ReflexType():
 			return nil
 		case db.CompleteRun.ReflexType():
 			return nil
@@ -147,7 +110,7 @@ func RegisterWorkflow(ctx context.Context, cl Client, cstore reflex.CursorStore,
 type runState struct {
 	mu        sync.Mutex
 	indexes   map[string]int
-	responses map[string]chan response // TODO(corver): refactor key from activity to activity+index
+	responses map[internal.Key]chan response
 	ack       chan struct{}
 }
 
@@ -156,13 +119,13 @@ type response struct {
 	event   *reflex.Event
 }
 
-func (s *runState) RespondActivity(e *reflex.Event, activity string, index int, message proto.Message) {
+func (s *runState) RespondActivity(e *reflex.Event, key internal.Key, message proto.Message) {
 	s.mu.Lock()
-	if _, ok := s.responses[activity]; !ok {
-		s.responses[activity] = make(chan response)
+	if _, ok := s.responses[key]; !ok {
+		s.responses[key] = make(chan response)
 	}
 	s.mu.Unlock()
-	s.responses[activity] <- response{event: e, message: message}
+	s.responses[key] <- response{event: e, message: message}
 	<-s.ack
 }
 
@@ -176,14 +139,14 @@ func (s *runState) GetAndIncIndex(activity string) int {
 	return s.indexes[activity]
 }
 
-func (s *runState) AwaitActivity(activity string, index int) response {
+func (s *runState) AwaitActivity(key internal.Key) response {
 	s.mu.Lock()
-	if _, ok := s.responses[activity]; !ok {
-		s.responses[activity] = make(chan response)
+	if _, ok := s.responses[key]; !ok {
+		s.responses[key] = make(chan response)
 	}
 	s.mu.Unlock()
 	s.ack <- struct{}{}
-	return <-s.responses[activity]
+	return <-s.responses[key]
 }
 
 type runner struct {
@@ -196,27 +159,27 @@ type runner struct {
 	runs map[string]*runState
 }
 
-func (r *runner) StartRun(ctx context.Context, e *reflex.Event, run string, args proto.Message) error {
+func (r *runner) StartRun(ctx context.Context, e *reflex.Event, key internal.Key, args proto.Message) error {
 	r.Lock()
 	defer r.Unlock()
 
-	if _, ok := r.runs[run]; ok {
+	if _, ok := r.runs[key.Run]; ok {
 		return errors.New("run already started")
 	}
 
 	s := &runState{
-		responses: make(map[string]chan response),
+		responses: make(map[internal.Key]chan response),
 		indexes:   make(map[string]int),
 		ack:       make(chan struct{}),
 	}
-	r.runs[run] = s
+	r.runs[key.Run] = s
 
 	go func() {
 		for {
-			r.run(ctx, e, run, args, s)
+			r.run(ctx, e, key.Run, args, s)
 
 			ensure(ctx, func() error {
-				return r.cl.CompleteRun(ctx, r.workflow, run)
+				return r.cl.CompleteRun(ctx, r.workflow, key.Run)
 			})
 
 			return
@@ -234,7 +197,7 @@ func (r *runner) bootstrapRun(ctx context.Context, run string, upTo int64) error
 	}
 
 	for i, e := range el {
-		id, message, err := internal.ParseEvent(&e)
+		key, message, err := internal.ParseEvent(&e)
 		if err != nil {
 			return err
 		}
@@ -244,7 +207,7 @@ func (r *runner) bootstrapRun(ctx context.Context, run string, upTo int64) error
 				return errors.New("unexpected first event", j.KV("type", e.Type))
 			}
 
-			err := r.StartRun(ctx, &e, run, message)
+			err := r.StartRun(ctx, &e, key, message)
 			if err != nil {
 				return err
 			}
@@ -256,7 +219,7 @@ func (r *runner) bootstrapRun(ctx context.Context, run string, upTo int64) error
 			break
 		}
 
-		err = r.RespondActivity(ctx, &e, run, id.Activity, id.Index, message)
+		err = r.RespondActivity(ctx, &e, key, message)
 		if err != nil {
 			return err
 		}
@@ -265,16 +228,16 @@ func (r *runner) bootstrapRun(ctx context.Context, run string, upTo int64) error
 	return nil
 }
 
-func (r *runner) RespondActivity(ctx context.Context, e *reflex.Event, run string, activity string, index int, message proto.Message) error {
+func (r *runner) RespondActivity(ctx context.Context, e *reflex.Event, key internal.Key, message proto.Message) error {
 	r.Lock()
 
-	if _, ok := r.runs[run]; !ok {
+	if _, ok := r.runs[key.Run]; !ok {
 		// This run was previously started and is now continuing; bootstrap it.
 		r.Unlock()
-		return r.bootstrapRun(ctx, run, e.IDInt())
+		return r.bootstrapRun(ctx, key.Run, e.IDInt())
 	}
 
-	r.runs[run].RespondActivity(e, activity, index, message)
+	r.runs[key.Run].RespondActivity(e, key, message)
 
 	r.Unlock()
 	return nil
@@ -311,69 +274,39 @@ type RunContext struct {
 func (c *RunContext) ExecActivity(activityFunc interface{}, args proto.Message) proto.Message {
 	activity := getFunctionName(activityFunc)
 	index := c.state.GetAndIncIndex(activity)
-
-	ensure(c, func() error {
-		return c.cl.RequestActivity(c, c.workflow, c.run, activity, index, args)
-	})
-
-	res := c.state.AwaitActivity(activity, index)
-	c.lastEvent = res.event
-	return res.message
-}
-
-func (c *RunContext) AsyncActivity(activityFunc interface{}, args proto.Message) *Future {
-	activity := getFunctionName(activityFunc)
-	index := c.state.GetAndIncIndex(activity)
-
-	ensure(c, func() error {
-		return c.cl.RequestAsyncActivity(c, c.workflow, c.run, activity, index, args)
-	})
-
-	eid := db.EventID{
+	key := internal.Key{
 		Workflow: c.workflow,
 		Run:      c.run,
 		Activity: activity,
-		Index:    index,
-	}
-	foreignID, err := json.Marshal(eid)
-	if err != nil {
-		panic("what!")
+		Sequence: fmt.Sprint(index),
 	}
 
-	return &Future{
-		activity: activity,
-		activityIdx: index,
-		token: internal.MarshalAsyncToken(string(foreignID)),
-	}
+	ensure(c, func() error {
+		return c.cl.RequestActivity(c, key.Encode(), args)
+	})
+
+	res := c.state.AwaitActivity(key)
+	c.lastEvent = res.event
+	return res.message
 }
 
 func (c *RunContext) Sleep(duration time.Duration) {
 	activity := internal.SleepActivity
 	index := c.state.GetAndIncIndex(activity)
+	key := internal.Key{
+		Workflow: c.workflow,
+		Run:      c.run,
+		Activity: activity,
+		Sequence: fmt.Sprint(index),
+	}
 
 	ensure(c, func() error {
-		return c.cl.RequestActivity(c, c.workflow, c.run, activity, index, &internal.SleepRequest{
+		return c.cl.RequestActivity(c, key.Encode(), &internal.SleepRequest{
 			Duration:             ptypes.DurationProto(duration),
 		})
 	})
 
-	c.state.AwaitActivity(activity, index)
-}
-
-func (c *RunContext) Await(f *Future, timeout time.Duration) (proto.Message, bool) {
-	index := int(int64(f.activityIdx)<<10 | int64(f.awaitIdx))
-	f.awaitIdx++
-	ensure(c, func() error {
-		return c.cl.RequestActivity(c, c.workflow, c.run, internal.SleepActivity, index, &internal.SleepRequest{
-			Duration:             ptypes.DurationProto(timeout),
-			AsyncToken: f.token,
-		})
-	})
-
-	resp :=c.state.AwaitActivity(f.activity, index)
-	c.lastEvent= resp.event
-	_, didTimeout := resp.message.(*internal.SleepDone)
-	return resp.message, !didTimeout
+	c.state.AwaitActivity(key)
 }
 
 func (c *RunContext) CreateEvent() *reflex.Event {
@@ -381,13 +314,6 @@ func (c *RunContext) CreateEvent() *reflex.Event {
 }
 func (c *RunContext) LastEvent() *reflex.Event {
 	return c.lastEvent
-}
-
-type Future struct {
-	token string
-	activity string
-	activityIdx int
-	awaitIdx int
 }
 
 func getFunctionName(i interface{}) string {

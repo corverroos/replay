@@ -3,7 +3,7 @@ package db
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
+	"github.com/corverroos/replay/internal"
 	"github.com/golang/protobuf/proto"
 	"github.com/golang/protobuf/ptypes"
 	"github.com/luno/jettison/errors"
@@ -18,6 +18,7 @@ var events = rsql.NewEventsTable("events",
 	rsql.WithEventTimeField("timestamp"),
 	rsql.WithEventsInMemNotifier(),
 	rsql.WithEventMetadataField("metadata"),
+	rsql.WithEventForeignIDField("`key`"),
 	rsql.WithEventsInserter(inserter),
 	rsql.WithEventsBackoff(time.Millisecond*100),
 )
@@ -51,12 +52,10 @@ const (
 	FailRun          EventType = 3
 	ActivityRequest  EventType = 4
 	ActivityResponse EventType = 5
-	AsyncActivityRequest  EventType = 6
-	AsyncActivityResponse EventType = 7
 )
 
 func ListBootstrapEvents(ctx context.Context, dbc *sql.DB, workflow, run string) ([]reflex.Event, error) {
-	rows, err := dbc.QueryContext(ctx, "select id, foreign_id, type, timestamp, metadata "+
+	rows, err := dbc.QueryContext(ctx, "select id, `key`, type, timestamp, metadata "+
 		"from events where workflow=? and run=? and (type=? or type=?) order by id asc", workflow, run, CreateRun, ActivityResponse)
 	if err != nil {
 		return nil, err
@@ -82,17 +81,7 @@ func ListBootstrapEvents(ctx context.Context, dbc *sql.DB, workflow, run string)
 	return res, rows.Err()
 }
 
-func Insert(ctx context.Context, dbc *sql.DB, workflow, run string, activity string, index int, typ EventType, message proto.Message) error {
-	eid, err := json.Marshal(EventID{
-		Workflow: workflow,
-		Run:      run,
-		Activity: activity,
-		Index:    index,
-	})
-	if err != nil {
-		return err
-	}
-
+func Insert(ctx context.Context, dbc *sql.DB, key string, typ EventType, message proto.Message) error {
 	var meta []byte
 	if message != nil {
 		any, err := ptypes.MarshalAny(message)
@@ -115,7 +104,7 @@ func Insert(ctx context.Context, dbc *sql.DB, workflow, run string, activity str
 	// Do lookup to avoid creating tons of gaps when replaying long running runs.
 	var exists int
 	err = tx.QueryRowContext(ctx, "select exists("+
-		"select 1 from events where foreign_id = ? and type = ?)", string(eid), typ).
+		"select 1 from events where `key` = ? and type = ?)", key, typ).
 		Scan(&exists)
 	if err != nil {
 		return err
@@ -123,8 +112,8 @@ func Insert(ctx context.Context, dbc *sql.DB, workflow, run string, activity str
 		return nil
 	}
 
-	notify, err := events.InsertWithMetadata(ctx, tx, string(eid), typ, meta)
-	if _, ok := MaybeWrapErrDuplicate(err, "foreign_id_type"); ok {
+	notify, err := events.InsertWithMetadata(ctx, tx, key, typ, meta)
+	if _, ok := MaybeWrapErrDuplicate(err, "by_type_key"); ok {
 		return err
 	} else if err != nil {
 		return errors.Wrap(err, "insert")
@@ -134,27 +123,21 @@ func Insert(ctx context.Context, dbc *sql.DB, workflow, run string, activity str
 	return tx.Commit()
 }
 
-type EventID struct {
-	Workflow string
-	Run      string
-	Activity string `json:"activity,omitempty"`
-	Index    int
-}
-
 func inserter(ctx context.Context, tx *sql.Tx,
-	foreignID string, typ reflex.EventType, metadata []byte) error {
-	var eid EventID
-	if err := json.Unmarshal([]byte(foreignID), &eid); err != nil {
-		return errors.Wrap(err, "insert foreign id")
+	key string, typ reflex.EventType, metadata []byte) error {
+
+	k, err := internal.DecodeKey(key)
+	if err != nil {
+		return err
 	}
 
 	var run sql.NullString
-	if eid.Run != "" {
-		run.String = eid.Run
+	if k.Run != "" {
+		run.String = k.Run
 		run.Valid = true
 	}
 
-	_, err := tx.ExecContext(ctx, "insert into events set foreign_id=?, workflow=?, run=?, "+
-		"timestamp=now(3), type=?, metadata=?", foreignID, eid.Workflow, run, typ, metadata)
+	_, err = tx.ExecContext(ctx, "insert into events set `key`=?, workflow=?, run=?, "+
+		"timestamp=now(3), type=?, metadata=?", key, k.Workflow, run, typ, metadata)
 	return err
 }
