@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/corverroos/replay"
-	"github.com/corverroos/replay/client"
+	"github.com/corverroos/replay/client/logical"
 	"github.com/corverroos/replay/db"
 	"github.com/corverroos/replay/internal"
 	"github.com/corverroos/replay/signal"
@@ -23,8 +23,9 @@ import (
 //go:generate protoc --go_out=plugins=grpc:. ./example.proto
 
 func TestExample(t *testing.T) {
+	db.CleanCache(t)
 	dbc := db.ConnectForTesting(t)
-	cl := client.New(dbc)
+	cl := logical.New(dbc)
 	ctx := context.Background()
 	cstore := new(memCursorStore)
 	completeChan := make(chan string)
@@ -45,8 +46,9 @@ func TestExample(t *testing.T) {
 }
 
 func TestExampleReplay(t *testing.T) {
+	db.CleanCache(t)
 	dbc := db.ConnectForTesting(t)
-	cl := client.New(dbc)
+	cl := logical.New(dbc)
 	ctx := context.Background()
 	cstore := new(memCursorStore)
 	errsChan := make(chan string)
@@ -82,8 +84,9 @@ func TestExampleReplay(t *testing.T) {
 }
 
 func TestExampleSleep(t *testing.T) {
+	db.CleanCache(t)
 	dbc := db.ConnectForTesting(t)
-	cl := client.New(dbc)
+	cl := logical.New(dbc)
 	ctx := context.Background()
 	cstore := new(memCursorStore)
 	completeChan := make(chan string)
@@ -104,8 +107,9 @@ func TestExampleSleep(t *testing.T) {
 }
 
 func TestExampleSignal(t *testing.T) {
+	db.CleanCache(t)
 	dbc := db.ConnectForTesting(t)
-	cl := client.New(dbc)
+	cl := logical.New(dbc)
 	ctx := context.Background()
 	cstore := new(memCursorStore)
 	completeChan := make(chan string)
@@ -121,6 +125,27 @@ func TestExampleSignal(t *testing.T) {
 	replay.RegisterWorkflow(ctx, tcl, cstore, SignalWorkflow)
 
 	err := cl.RunWorkflow(ctx, "SignalWorkflow", "test", new(Empty))
+	jtest.RequireNil(t, err)
+
+	<-completeChan
+}
+
+func TestExampleGRPC(t *testing.T) {
+	cl, _ := SetupForTesting(t)
+	ctx := context.Background()
+	cstore := new(memCursorStore)
+	completeChan := make(chan string)
+	tcl := &testClient{
+		Client:       cl,
+		completeChan: completeChan,
+	}
+	var b Backends
+
+	replay.RegisterActivity(ctx, cl, cstore, b, EnrichGreeting)
+	replay.RegisterActivity(ctx, cl, cstore, b, PrintGreeting)
+	replay.RegisterWorkflow(ctx, tcl, cstore, GreetingWorkflow)
+
+	err := cl.RunWorkflow(context.Background(), "GreetingWorkflow", t.Name(), &String{Value: "World"})
 	jtest.RequireNil(t, err)
 
 	<-completeChan

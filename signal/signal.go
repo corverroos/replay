@@ -8,14 +8,15 @@ import (
 	"github.com/corverroos/replay"
 	"github.com/corverroos/replay/db"
 	"github.com/corverroos/replay/internal"
+	"github.com/corverroos/replay/replaypb"
 	"github.com/golang/protobuf/proto"
 	"github.com/golang/protobuf/ptypes"
+	"github.com/golang/protobuf/ptypes/any"
 	"github.com/luno/fate"
 	"github.com/luno/jettison/errors"
 	"github.com/luno/jettison/log"
 	"github.com/luno/reflex"
 	"github.com/luno/reflex/rpatterns"
-	"google.golang.org/protobuf/types/known/anypb"
 )
 
 //go:generate protoc --go_out=plugins=grpc:. ./sleep.proto
@@ -63,7 +64,7 @@ func Register(ctx context.Context, cl replay.Client, cstore reflex.CursorStore, 
 			return nil
 		}
 
-		req := message.(*internal.SleepRequest)
+		req := message.(*replaypb.SleepRequest)
 		completeAt := time.Now().Add(time.Duration(req.Duration.Seconds) * time.Second)
 
 		_, err = dbc.ExecContext(ctx, "insert into signal_checks set `key`=?, "+
@@ -141,7 +142,7 @@ func completeChecksOnce(ctx context.Context, cl replay.Client, dbc *sql.DB) erro
 
 		var msg proto.Message
 		if len(sig.Message) > 0 {
-			var a anypb.Any
+			var a any.Any
 			if err := proto.Unmarshal(sig.Message, &a); err != nil {
 				return errors.Wrap(err, "unmarshal proto")
 			}
@@ -170,7 +171,7 @@ func completeChecksOnce(ctx context.Context, cl replay.Client, dbc *sql.DB) erro
 			return nil
 		}
 
-		err := cl.CompleteActivity(ctx, c.Key, &internal.SleepDone{})
+		err := cl.CompleteActivity(ctx, c.Key, &replaypb.SleepDone{})
 		if err != nil {
 			return err
 		}

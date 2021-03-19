@@ -1,4 +1,4 @@
-package client
+package logical
 
 import (
 	"context"
@@ -23,8 +23,13 @@ type Client struct {
 	dbc *sql.DB
 }
 
-func (c *Client) RunWorkflow(ctx context.Context, workflow, run string, args proto.Message) error {
-	return db.Insert(ctx, c.dbc, shortKey(workflow, run), db.CreateRun, args)
+func (c *Client) RunWorkflow(ctx context.Context, workflow, run string, message proto.Message) error {
+	b, err := toBytes(message)
+	if err != nil {
+		return err
+	}
+
+	return db.Insert(ctx, c.dbc, internal.ShortKey(workflow, run), db.CreateRun, b)
 }
 
 func (c *Client) SignalRun(ctx context.Context, workflow, run string, s replay.Signal, message proto.Message, extID string) error {
@@ -32,15 +37,25 @@ func (c *Client) SignalRun(ctx context.Context, workflow, run string, s replay.S
 }
 
 func (c *Client) RequestActivity(ctx context.Context, key string, message proto.Message) error {
-	return swallowErrDup(db.Insert(ctx, c.dbc, key, db.ActivityRequest, message))
+	b, err := toBytes(message)
+	if err != nil {
+		return err
+	}
+
+	return swallowErrDup(db.Insert(ctx, c.dbc, key, db.ActivityRequest, b))
 }
 
 func (c *Client) CompleteActivity(ctx context.Context, key string, message proto.Message) error {
-	return swallowErrDup(db.Insert(ctx, c.dbc, key, db.ActivityResponse, message))
+	b, err := toBytes(message)
+	if err != nil {
+		return err
+	}
+
+	return swallowErrDup(db.Insert(ctx, c.dbc, key, db.ActivityResponse, b))
 }
 
 func (c *Client) CompleteRun(ctx context.Context, workflow, run string) error {
-	return swallowErrDup(db.Insert(ctx, c.dbc, shortKey(workflow, run), db.CompleteRun, nil))
+	return swallowErrDup(db.Insert(ctx, c.dbc, internal.ShortKey(workflow, run), db.CompleteRun, nil))
 }
 
 func (c *Client) ListBootstrapEvents(ctx context.Context, workflow, run string) ([]reflex.Event, error) {
@@ -51,8 +66,13 @@ func (c *Client) Stream(ctx context.Context, after string, opts ...reflex.Stream
 	return db.ToStream(c.dbc)(ctx, after, opts...)
 }
 
-func shortKey(workflow, run string) string {
-	return internal.Key{Workflow: workflow, Run: run}.Encode()
+func toBytes(message proto.Message) ([]byte, error) {
+	apb, err := internal.ToAny(message)
+	if err != nil {
+		return nil, err
+	}
+
+	return proto.Marshal(apb)
 }
 
 func swallowErrDup(err error) error {

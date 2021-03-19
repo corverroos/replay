@@ -3,13 +3,11 @@ package db
 import (
 	"context"
 	"database/sql"
-	"github.com/corverroos/replay/internal"
-	"github.com/golang/protobuf/proto"
-	"github.com/golang/protobuf/ptypes"
-	"github.com/luno/jettison/errors"
 	"testing"
 	"time"
 
+	"github.com/corverroos/replay/internal"
+	"github.com/luno/jettison/errors"
 	"github.com/luno/reflex"
 	"github.com/luno/reflex/rsql"
 )
@@ -81,20 +79,7 @@ func ListBootstrapEvents(ctx context.Context, dbc *sql.DB, workflow, run string)
 	return res, rows.Err()
 }
 
-func Insert(ctx context.Context, dbc *sql.DB, key string, typ EventType, message proto.Message) error {
-	var meta []byte
-	if message != nil {
-		any, err := ptypes.MarshalAny(message)
-		if err != nil {
-			return err
-		}
-
-		meta, err = proto.Marshal(any)
-		if err != nil {
-			return err
-		}
-	}
-
+func Insert(ctx context.Context, dbc *sql.DB, key string, typ EventType, message []byte) error {
 	tx, err := dbc.Begin()
 	if err != nil {
 		return err
@@ -112,7 +97,7 @@ func Insert(ctx context.Context, dbc *sql.DB, key string, typ EventType, message
 		return nil
 	}
 
-	notify, err := events.InsertWithMetadata(ctx, tx, key, typ, meta)
+	notify, err := events.InsertWithMetadata(ctx, tx, key, typ, message)
 	if _, ok := MaybeWrapErrDuplicate(err, "by_type_key"); ok {
 		return err
 	} else if err != nil {

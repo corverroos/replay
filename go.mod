@@ -13,5 +13,6 @@ require (
 	github.com/pkg/errors v0.9.1
 	github.com/stretchr/testify v1.6.1
 	go.temporal.io/sdk v1.5.0 // indirect
+	google.golang.org/grpc v1.34.0
 	google.golang.org/protobuf v1.25.0
 )

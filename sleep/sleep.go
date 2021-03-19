@@ -3,21 +3,23 @@ package sleep
 import (
 	"context"
 	"database/sql"
+	"time"
+
 	"github.com/corverroos/replay"
 	"github.com/corverroos/replay/db"
 	"github.com/corverroos/replay/internal"
+	"github.com/corverroos/replay/replaypb"
 	"github.com/luno/fate"
 	"github.com/luno/jettison/log"
 	"github.com/luno/reflex"
 	"github.com/luno/reflex/rpatterns"
 	"github.com/pkg/errors"
-	"time"
 )
 
 //go:generate protoc --go_out=plugins=grpc:. ./sleep.proto
 
 func RegisterForTesting(ctx context.Context, cl replay.Client, cstore reflex.CursorStore, dbc *sql.DB) {
-	pollPeriod = time.Millisecond*100
+	pollPeriod = time.Millisecond * 100
 	shouldComplete = func(completeAt time.Time) bool {
 		return true
 	}
@@ -39,7 +41,7 @@ func Register(ctx context.Context, cl replay.Client, cstore reflex.CursorStore, 
 			return nil
 		}
 
-		req := message.(*internal.SleepRequest)
+		req := message.(*replaypb.SleepRequest)
 		completeAt := time.Now().Add(time.Duration(req.Duration.Seconds) * time.Second)
 
 		_, err = dbc.ExecContext(ctx, "insert into sleeps set `key`=?, "+
@@ -79,7 +81,7 @@ func completeSleepsOnce(ctx context.Context, cl replay.Client, dbc *sql.DB) erro
 			return nil
 		}
 
-		err := cl.CompleteActivity(ctx, s.Key, &internal.SleepDone{})
+		err := cl.CompleteActivity(ctx, s.Key, &replaypb.SleepDone{})
 		if err != nil {
 			return err
 		}
@@ -95,7 +97,7 @@ var shouldComplete = func(completeAt time.Time) bool {
 
 type sleep struct {
 	ID         int
-	Key  string
+	Key        string
 	CreatedAt  time.Time
 	CompleteAt time.Time
 }

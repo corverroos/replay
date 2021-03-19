@@ -8,9 +8,10 @@ import (
 
 	"github.com/golang/protobuf/proto"
 	"github.com/golang/protobuf/ptypes"
+	"github.com/golang/protobuf/ptypes/any"
 	"github.com/luno/jettison/errors"
 	"github.com/luno/reflex"
-	"google.golang.org/protobuf/types/known/anypb"
+	"github.com/luno/reflex/reflexpb"
 )
 
 const SleepActivity = "replay_sleep"
@@ -26,7 +27,7 @@ func ParseEvent(e *reflex.Event) (Key, proto.Message, error) {
 		return k, nil, nil
 	}
 
-	var a anypb.Any
+	var a any.Any
 	if err := proto.Unmarshal(e.MetaData, &a); err != nil {
 		return Key{}, nil, errors.Wrap(err, "unmarshal proto")
 	}
@@ -96,4 +97,62 @@ func DecodeKey(key string) (Key, error) {
 		}
 	}
 	return k, nil
+}
+
+func EventToProto(e *reflex.Event) (*reflexpb.Event, error) {
+	ts, err := ptypes.TimestampProto(e.Timestamp)
+	if err != nil {
+		return nil, err
+	}
+
+	return &reflexpb.Event{
+		Id:        e.ID,
+		ForeignId: e.ForeignID,
+		Type:      int32(e.Type.ReflexType()),
+		Timestamp: ts,
+		Metadata:  e.MetaData,
+	}, nil
+}
+
+func EventFromProto(e *reflexpb.Event) (*reflex.Event, error) {
+	ts, err := ptypes.Timestamp(e.Timestamp)
+	if err != nil {
+		return nil, err
+	}
+
+	return &reflex.Event{
+		ID:        e.Id,
+		ForeignID: e.ForeignId,
+		Type:      eventType(e.Type),
+		Timestamp: ts,
+		MetaData:  e.Metadata,
+	}, nil
+}
+
+func ShortKey(workflow, run string) string {
+	return Key{Workflow: workflow, Run: run}.Encode()
+}
+
+type Sig int
+
+func (s Sig) SignalType() int {
+	return int(s)
+}
+
+func (s Sig) MessageType() proto.Message {
+	panic("type not supported for internal signal")
+}
+
+type eventType int
+
+func (e eventType) ReflexType() int {
+	return int(e)
+}
+
+func ToAny(message proto.Message) (*any.Any, error) {
+	if message == nil {
+		return nil, nil
+	}
+
+	return ptypes.MarshalAny(message)
 }

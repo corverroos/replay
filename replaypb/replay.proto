@@ -1,0 +1,58 @@
+syntax = "proto3";
+
+package replaypb;
+
+import "github.com/luno/reflex/reflexpb/reflex.proto";
+import "google/protobuf/any.proto";
+import "google/protobuf/duration.proto";
+
+service Replay {
+  rpc RunWorkflow(RunRequest) returns (Empty) {}
+  rpc SignalRun(SignalRequest) returns (Empty) {}
+  rpc RequestActivity(ActivityRequest) returns (Empty) {}
+  rpc CompleteActivity(ActivityRequest) returns (Empty) {}
+  rpc CompleteRun(CompleteRequest) returns (Empty) {}
+  rpc ListBootstrapEvents(ListBootstrapRequest) returns (Events) {}
+  rpc Stream(reflexpb.StreamRequest) returns (stream reflexpb.Event) {}
+}
+
+message Empty {}
+
+message SleepDone{}
+
+message SleepRequest{
+  google.protobuf.Duration duration = 1;
+}
+
+message Events {
+  repeated reflexpb.Event events = 1;
+}
+
+message RunRequest {
+  string workflow = 1;
+  string run = 2;
+  google.protobuf.Any message = 3;
+}
+
+message SignalRequest {
+  string workflow = 1;
+  string run = 2;
+  int32 signal_type = 3;
+  google.protobuf.Any message = 4;
+  string external_id = 5;
+}
+
+message ActivityRequest {
+  string key = 2;
+  google.protobuf.Any message = 3;
+}
+
+message CompleteRequest {
+  string workflow = 1;
+  string run = 2;
+}
+
+message ListBootstrapRequest {
+  string workflow = 1;
+  string run = 2;
+}

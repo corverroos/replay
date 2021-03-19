@@ -11,6 +11,7 @@ import (
 
 	"github.com/corverroos/replay/db"
 	"github.com/corverroos/replay/internal"
+	"github.com/corverroos/replay/replaypb"
 	"github.com/golang/protobuf/proto"
 	"github.com/golang/protobuf/ptypes"
 	"github.com/luno/fate"
@@ -310,14 +311,14 @@ func (c *RunContext) AwaitSignal(s Signal, duration time.Duration) (proto.Messag
 		Sequence: seq.Encode(),
 	}
 	ensure(c, func() error {
-		return c.cl.RequestActivity(c, key.Encode(), &internal.SleepRequest{
+		return c.cl.RequestActivity(c, key.Encode(), &replaypb.SleepRequest{
 			Duration: ptypes.DurationProto(duration),
 		})
 	})
 
 	res := c.state.AwaitActivity(key)
 	c.lastEvent = res.event
-	if _, ok := res.message.(*internal.SleepDone); ok {
+	if _, ok := res.message.(*replaypb.SleepDone); ok {
 		return nil, false
 	}
 	return res.message, true
@@ -334,7 +335,7 @@ func (c *RunContext) Sleep(duration time.Duration) {
 	}
 
 	ensure(c, func() error {
-		return c.cl.RequestActivity(c, key.Encode(), &internal.SleepRequest{
+		return c.cl.RequestActivity(c, key.Encode(), &replaypb.SleepRequest{
 			Duration: ptypes.DurationProto(duration),
 		})
 	})
