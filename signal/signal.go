@@ -21,11 +21,6 @@ import (
 
 //go:generate protoc --go_out=plugins=grpc:. ./sleep.proto
 
-type signal struct {
-	ID      int64
-	Message []byte
-}
-
 type check struct {
 	ID     int64
 	Key    string
@@ -83,7 +78,7 @@ func Register(ctx context.Context, cl replay.Client, cstore reflex.CursorStore, 
 	go completeChecksForever(ctx, cl, dbc)
 }
 
-func Insert(ctx context.Context, dbc *sql.DB, workflow, run string, s replay.Signal, message proto.Message, externalID string) error {
+func Insert(ctx context.Context, dbc *sql.DB, workflow, run string, signalType int, message proto.Message, externalID string) error {
 	var b []byte
 	if message != nil {
 		any, err := ptypes.MarshalAny(message)
@@ -98,7 +93,7 @@ func Insert(ctx context.Context, dbc *sql.DB, workflow, run string, s replay.Sig
 	}
 
 	_, err := dbc.ExecContext(ctx, "insert into signals set workflow=?, run=?, type=?, external_id=?, created_at=?, message=? ",
-		workflow, run, s.SignalType(), externalID, time.Now(), b)
+		workflow, run, signalType, externalID, time.Now(), b)
 	if err, ok := db.MaybeWrapErrDuplicate(err, "uniq"); ok {
 		return err
 	} else if err != nil {
@@ -132,7 +127,7 @@ func completeChecksOnce(ctx context.Context, cl replay.Client, dbc *sql.DB) erro
 			return err
 		}
 
-		sig, err := lookupSignal(ctx, dbc, key)
+		id, message, err := lookupSignal(ctx, dbc, key)
 		if errors.Is(err, sql.ErrNoRows) {
 			other = append(other, c)
 			continue
@@ -141,9 +136,9 @@ func completeChecksOnce(ctx context.Context, cl replay.Client, dbc *sql.DB) erro
 		}
 
 		var msg proto.Message
-		if len(sig.Message) > 0 {
+		if len(message) > 0 {
 			var a any.Any
-			if err := proto.Unmarshal(sig.Message, &a); err != nil {
+			if err := proto.Unmarshal(message, &a); err != nil {
 				return errors.Wrap(err, "unmarshal proto")
 			}
 
@@ -160,7 +155,7 @@ func completeChecksOnce(ctx context.Context, cl replay.Client, dbc *sql.DB) erro
 			return err
 		}
 
-		err = completeSignal(ctx, dbc, sig.ID, c.ID)
+		err = completeSignal(ctx, dbc, id, c.ID)
 		if err != nil {
 			return err
 		}
@@ -190,17 +185,16 @@ var shouldComplete = func(completeAt time.Time) bool {
 	return completeAt.Before(time.Now())
 }
 
-func lookupSignal(ctx context.Context, dbc *sql.DB, key internal.Key) (signal, error) {
+func lookupSignal(ctx context.Context, dbc *sql.DB, key internal.Key) (id int64, message []byte, err error) {
 	seq, err := internal.DecodeSignalSequence(key.Sequence)
 	if err != nil {
-		return signal{}, err
+		return 0, nil, err
 	}
 
-	var s signal
 	err = dbc.QueryRowContext(ctx, "select id, message "+
 		"from signals where workflow=? and run=? and type=? and check_id is null",
-		key.Workflow, key.Run, seq.SignalType).Scan(&s.ID, &s.Message)
-	return s, err
+		key.Workflow, key.Run, seq.SignalType).Scan(&id, &message)
+	return id, message, err
 }
 
 func failCheck(ctx context.Context, dbc *sql.DB, checkID int64) error {

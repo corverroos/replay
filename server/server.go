@@ -32,7 +32,7 @@ func (s *Server) RunWorkflow(ctx context.Context, req *pb.RunRequest) (*pb.Empty
 }
 
 func (s *Server) SignalRun(ctx context.Context, req *pb.SignalRequest) (*pb.Empty, error) {
-	return new(pb.Empty), signal.Insert(ctx, s.dbc, req.Workflow, req.Run, internal.Sig(req.SignalType), req.Message, req.ExternalId)
+	return new(pb.Empty), signal.Insert(ctx, s.dbc, req.Workflow, req.Run, int(req.SignalType), req.Message, req.ExternalId)
 }
 
 func (s *Server) RequestActivity(ctx context.Context, req *pb.ActivityRequest) (*pb.Empty, error) {

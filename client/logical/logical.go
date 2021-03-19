@@ -33,7 +33,7 @@ func (c *Client) RunWorkflow(ctx context.Context, workflow, run string, message 
 }
 
 func (c *Client) SignalRun(ctx context.Context, workflow, run string, s replay.Signal, message proto.Message, extID string) error {
-	return signal.Insert(ctx, c.dbc, workflow, run, s, message, extID)
+	return signal.Insert(ctx, c.dbc, workflow, run, s.SignalType(), message, extID)
 }
 
 func (c *Client) RequestActivity(ctx context.Context, key string, message proto.Message) error {

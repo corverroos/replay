@@ -133,16 +133,6 @@ func ShortKey(workflow, run string) string {
 	return Key{Workflow: workflow, Run: run}.Encode()
 }
 
-type Sig int
-
-func (s Sig) SignalType() int {
-	return int(s)
-}
-
-func (s Sig) MessageType() proto.Message {
-	panic("type not supported for internal signal")
-}
-
 type eventType int
 
 func (e eventType) ReflexType() int {
