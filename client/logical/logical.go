@@ -5,9 +5,9 @@ import (
 	"database/sql"
 
 	"github.com/corverroos/replay"
-	"github.com/corverroos/replay/db"
 	"github.com/corverroos/replay/internal"
-	"github.com/corverroos/replay/signal"
+	"github.com/corverroos/replay/internal/db"
+	"github.com/corverroos/replay/internal/signal"
 	"github.com/golang/protobuf/proto"
 	"github.com/luno/jettison/errors"
 	"github.com/luno/reflex"
@@ -29,7 +29,7 @@ func (c *Client) RunWorkflow(ctx context.Context, workflow, run string, message 
 		return err
 	}
 
-	return db.Insert(ctx, c.dbc, internal.ShortKey(workflow, run), db.CreateRun, b)
+	return db.Insert(ctx, c.dbc, internal.ShortKey(workflow, run), internal.CreateRun, b)
 }
 
 func (c *Client) SignalRun(ctx context.Context, workflow, run string, s replay.Signal, message proto.Message, extID string) error {
@@ -42,7 +42,7 @@ func (c *Client) RequestActivity(ctx context.Context, key string, message proto.
 		return err
 	}
 
-	return swallowErrDup(db.Insert(ctx, c.dbc, key, db.ActivityRequest, b))
+	return swallowErrDup(db.Insert(ctx, c.dbc, key, internal.ActivityRequest, b))
 }
 
 func (c *Client) CompleteActivity(ctx context.Context, key string, message proto.Message) error {
@@ -51,11 +51,11 @@ func (c *Client) CompleteActivity(ctx context.Context, key string, message proto
 		return err
 	}
 
-	return swallowErrDup(db.Insert(ctx, c.dbc, key, db.ActivityResponse, b))
+	return swallowErrDup(db.Insert(ctx, c.dbc, key, internal.ActivityResponse, b))
 }
 
 func (c *Client) CompleteRun(ctx context.Context, workflow, run string) error {
-	return swallowErrDup(db.Insert(ctx, c.dbc, internal.ShortKey(workflow, run), db.CompleteRun, nil))
+	return swallowErrDup(db.Insert(ctx, c.dbc, internal.ShortKey(workflow, run), internal.CompleteRun, nil))
 }
 
 func (c *Client) ListBootstrapEvents(ctx context.Context, workflow, run string) ([]reflex.Event, error) {
@@ -76,7 +76,7 @@ func toBytes(message proto.Message) ([]byte, error) {
 }
 
 func swallowErrDup(err error) error {
-	if errors.Is(err, db.ErrDuplicate) {
+	if errors.Is(err, replay.ErrDuplicate) {
 		return nil
 	} else if err != nil {
 		return err

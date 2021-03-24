@@ -4,16 +4,13 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"sync"
 	"testing"
 	"time"
 
 	"github.com/corverroos/replay"
 	"github.com/corverroos/replay/client/logical"
-	"github.com/corverroos/replay/db"
 	"github.com/corverroos/replay/internal"
-	"github.com/corverroos/replay/signal"
-	"github.com/corverroos/replay/sleep"
+	"github.com/corverroos/replay/test"
 	"github.com/golang/protobuf/proto"
 	"github.com/luno/jettison/jtest"
 	"github.com/luno/jettison/log"
@@ -23,11 +20,10 @@ import (
 //go:generate protoc --go_out=plugins=grpc:. ./example.proto
 
 func TestExample(t *testing.T) {
-	db.CleanCache(t)
-	dbc := db.ConnectForTesting(t)
+	dbc := test.ConnectDB(t)
 	cl := logical.New(dbc)
 	ctx := context.Background()
-	cstore := new(memCursorStore)
+	cstore := new(test.MemCursorStore)
 	completeChan := make(chan string)
 	tcl := &testClient{
 		Client:       cl,
@@ -46,11 +42,10 @@ func TestExample(t *testing.T) {
 }
 
 func TestExampleReplay(t *testing.T) {
-	db.CleanCache(t)
-	dbc := db.ConnectForTesting(t)
+	dbc := test.ConnectDB(t)
 	cl := logical.New(dbc)
 	ctx := context.Background()
-	cstore := new(memCursorStore)
+	cstore := new(test.MemCursorStore)
 	errsChan := make(chan string)
 	tcl1 := &testClient{
 		Client:       cl,
@@ -84,11 +79,10 @@ func TestExampleReplay(t *testing.T) {
 }
 
 func TestExampleSleep(t *testing.T) {
-	db.CleanCache(t)
-	dbc := db.ConnectForTesting(t)
+	dbc := test.ConnectDB(t)
 	cl := logical.New(dbc)
 	ctx := context.Background()
-	cstore := new(memCursorStore)
+	cstore := new(test.MemCursorStore)
 	completeChan := make(chan string)
 	tcl := &testClient{
 		Client:       cl,
@@ -96,7 +90,7 @@ func TestExampleSleep(t *testing.T) {
 	}
 
 	b := Backends{Replay: cl}
-	sleep.RegisterForTesting(ctx, cl, cstore, dbc)
+	test.RegisterNoopSleeps(ctx, cl, cstore, dbc)
 	replay.RegisterActivity(ctx, cl, cstore, b, PrintGreeting)
 	replay.RegisterWorkflow(ctx, tcl, cstore, SleepWorkflow)
 
@@ -107,11 +101,10 @@ func TestExampleSleep(t *testing.T) {
 }
 
 func TestExampleSignal(t *testing.T) {
-	db.CleanCache(t)
-	dbc := db.ConnectForTesting(t)
+	dbc := test.ConnectDB(t)
 	cl := logical.New(dbc)
 	ctx := context.Background()
-	cstore := new(memCursorStore)
+	cstore := new(test.MemCursorStore)
 	completeChan := make(chan string)
 	tcl := &testClient{
 		Client:       cl,
@@ -119,7 +112,8 @@ func TestExampleSignal(t *testing.T) {
 	}
 
 	b := Backends{Replay: cl}
-	signal.RegisterForTesting(ctx, cl, cstore, dbc)
+
+	test.RegisterNoSleepSignals(ctx, cl, cstore, dbc)
 	replay.RegisterActivity(ctx, cl, cstore, b, MaybeSignal)
 	replay.RegisterActivity(ctx, cl, cstore, b, PrintGreeting)
 	replay.RegisterWorkflow(ctx, tcl, cstore, SignalWorkflow)
@@ -131,9 +125,9 @@ func TestExampleSignal(t *testing.T) {
 }
 
 func TestExampleGRPC(t *testing.T) {
-	cl, _ := SetupForTesting(t)
+	cl, _ := test.SetupForTesting(t)
 	ctx := context.Background()
-	cstore := new(memCursorStore)
+	cstore := new(test.MemCursorStore)
 	completeChan := make(chan string)
 	tcl := &testClient{
 		Client:       cl,
@@ -241,26 +235,3 @@ func (c *testClient) RequestActivity(ctx context.Context, key string, args proto
 
 	return c.Client.RequestActivity(ctx, key, args)
 }
-
-type memCursorStore struct {
-	sync.Mutex
-	cursors map[string]string
-}
-
-func (m *memCursorStore) GetCursor(_ context.Context, consumerName string) (string, error) {
-	m.Lock()
-	defer m.Unlock()
-	return m.cursors[consumerName], nil
-}
-
-func (m *memCursorStore) SetCursor(_ context.Context, consumerName string, cursor string) error {
-	m.Lock()
-	defer m.Unlock()
-	if m.cursors == nil {
-		m.cursors = make(map[string]string)
-	}
-	m.cursors[consumerName] = cursor
-	return nil
-}
-
-func (m *memCursorStore) Flush(_ context.Context) error { return nil }

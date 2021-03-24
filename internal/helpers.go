@@ -1,6 +1,7 @@
 package internal
 
 import (
+	"context"
 	"fmt"
 	"path"
 	"strconv"
@@ -16,6 +17,20 @@ import (
 
 const SleepActivity = "replay_sleep"
 const SignalActivity = "replay_signal"
+
+type EventType int
+
+func (e EventType) ReflexType() int {
+	return int(e)
+}
+
+const (
+	CreateRun        EventType = 1
+	CompleteRun      EventType = 2
+	FailRun          EventType = 3
+	ActivityRequest  EventType = 4
+	ActivityResponse EventType = 5
+)
 
 func ParseEvent(e *reflex.Event) (Key, proto.Message, error) {
 	k, err := DecodeKey(e.ForeignID)
@@ -145,4 +160,12 @@ func ToAny(message proto.Message) (*any.Any, error) {
 	}
 
 	return ptypes.MarshalAny(message)
+}
+
+type Client interface {
+	RequestActivity(ctx context.Context, key string, message proto.Message) error
+	CompleteActivity(ctx context.Context, key string, message proto.Message) error
+	CompleteRun(ctx context.Context, workflow, run string) error
+	ListBootstrapEvents(ctx context.Context, workflow, run string) ([]reflex.Event, error)
+	Stream(ctx context.Context, after string, opts ...reflex.StreamOption) (reflex.StreamClient, error)
 }

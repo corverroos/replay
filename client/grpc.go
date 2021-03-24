@@ -5,16 +5,17 @@ import (
 
 	"github.com/corverroos/replay"
 	"github.com/corverroos/replay/internal"
-	pb "github.com/corverroos/replay/replaypb"
+	pb "github.com/corverroos/replay/internal/replaypb"
 	"github.com/golang/protobuf/proto"
 	"github.com/luno/reflex"
 	"github.com/luno/reflex/reflexpb"
+	"google.golang.org/grpc"
 )
 
 var _ replay.Client = (*Client)(nil)
 
-func New(cl pb.ReplayClient) *Client {
-	return &Client{clpb: cl}
+func New(cc *grpc.ClientConn) *Client {
+	return &Client{clpb: pb.NewReplayClient(cc)}
 }
 
 type Client struct {

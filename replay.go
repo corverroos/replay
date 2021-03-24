@@ -9,9 +9,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/corverroos/replay/db"
 	"github.com/corverroos/replay/internal"
-	"github.com/corverroos/replay/replaypb"
+	"github.com/corverroos/replay/internal/replaypb"
 	"github.com/golang/protobuf/proto"
 	"github.com/golang/protobuf/ptypes"
 	"github.com/luno/fate"
@@ -22,15 +21,13 @@ import (
 	"github.com/luno/reflex/rpatterns"
 )
 
+var ErrDuplicate = errors.New("duplicate entry", j.C("ERR_96713b1c52c5d59f"))
+
 type Client interface {
+	internal.Client // Internal client methods only for use by this package.
+
 	RunWorkflow(ctx context.Context, workflow, run string, message proto.Message) error
 	SignalRun(ctx context.Context, workflow, run string, s Signal, message proto.Message, extID string) error
-
-	RequestActivity(ctx context.Context, key string, message proto.Message) error
-	CompleteActivity(ctx context.Context, key string, message proto.Message) error
-	CompleteRun(ctx context.Context, workflow, run string) error
-	ListBootstrapEvents(ctx context.Context, workflow, run string) ([]reflex.Event, error)
-	Stream(ctx context.Context, after string, opts ...reflex.StreamOption) (reflex.StreamClient, error)
 }
 
 type Signal interface {
@@ -42,7 +39,7 @@ func RegisterActivity(ctx context.Context, cl Client, cstore reflex.CursorStore,
 	activity := getFunctionName(activityFunc)
 
 	fn := func(ctx context.Context, f fate.Fate, e *reflex.Event) error {
-		if !reflex.IsType(e.Type, db.ActivityRequest) {
+		if !reflex.IsType(e.Type, internal.ActivityRequest) {
 			return nil
 		}
 
@@ -95,15 +92,15 @@ func RegisterWorkflow(ctx context.Context, cl Client, cstore reflex.CursorStore,
 		}
 
 		switch e.Type.ReflexType() {
-		case db.CreateRun.ReflexType():
+		case internal.CreateRun.ReflexType():
 			return r.StartRun(ctx, e, key, message)
-		case db.ActivityResponse.ReflexType():
+		case internal.ActivityResponse.ReflexType():
 			return r.RespondActivity(ctx, e, key, message)
-		case db.ActivityRequest.ReflexType():
+		case internal.ActivityRequest.ReflexType():
 			return nil
-		case db.CompleteRun.ReflexType():
+		case internal.CompleteRun.ReflexType():
 			return nil
-		case db.FailRun.ReflexType():
+		case internal.FailRun.ReflexType():
 			return nil
 		default:
 			return errors.New("unknown type")
@@ -210,7 +207,7 @@ func (r *runner) bootstrapRun(ctx context.Context, run string, upTo int64) error
 		}
 
 		if i == 0 {
-			if !reflex.IsType(e.Type, db.CreateRun) {
+			if !reflex.IsType(e.Type, internal.CreateRun) {
 				return errors.New("unexpected first event", j.KV("type", e.Type))
 			}
 

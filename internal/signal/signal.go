@@ -6,9 +6,9 @@ import (
 	"time"
 
 	"github.com/corverroos/replay"
-	"github.com/corverroos/replay/db"
 	"github.com/corverroos/replay/internal"
-	"github.com/corverroos/replay/replaypb"
+	"github.com/corverroos/replay/internal/db"
+	"github.com/corverroos/replay/internal/replaypb"
 	"github.com/golang/protobuf/proto"
 	"github.com/golang/protobuf/ptypes"
 	"github.com/golang/protobuf/ptypes/any"
@@ -46,7 +46,7 @@ func RegisterForTesting(ctx context.Context, cl replay.Client, cstore reflex.Cur
 
 func Register(ctx context.Context, cl replay.Client, cstore reflex.CursorStore, dbc *sql.DB) {
 	fn := func(ctx context.Context, f fate.Fate, e *reflex.Event) error {
-		if !reflex.IsType(e.Type, db.ActivityRequest) {
+		if !reflex.IsType(e.Type, internal.ActivityRequest) {
 			return nil
 		}
 

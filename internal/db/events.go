@@ -38,23 +38,9 @@ func FillGaps(dbc *sql.DB) {
 	rsql.FillGaps(dbc, events)
 }
 
-type EventType int
-
-func (e EventType) ReflexType() int {
-	return int(e)
-}
-
-const (
-	CreateRun        EventType = 1
-	CompleteRun      EventType = 2
-	FailRun          EventType = 3
-	ActivityRequest  EventType = 4
-	ActivityResponse EventType = 5
-)
-
 func ListBootstrapEvents(ctx context.Context, dbc *sql.DB, workflow, run string) ([]reflex.Event, error) {
 	rows, err := dbc.QueryContext(ctx, "select id, `key`, type, timestamp, metadata "+
-		"from events where workflow=? and run=? and (type=? or type=?) order by id asc", workflow, run, CreateRun, ActivityResponse)
+		"from events where workflow=? and run=? and (type=? or type=?) order by id asc", workflow, run, internal.CreateRun, internal.ActivityResponse)
 	if err != nil {
 		return nil, err
 	}
@@ -72,14 +58,14 @@ func ListBootstrapEvents(ctx context.Context, dbc *sql.DB, workflow, run string)
 			return nil, err
 		}
 
-		e.Type = EventType(typ)
+		e.Type = internal.EventType(typ)
 		res = append(res, e)
 	}
 
 	return res, rows.Err()
 }
 
-func Insert(ctx context.Context, dbc *sql.DB, key string, typ EventType, message []byte) error {
+func Insert(ctx context.Context, dbc *sql.DB, key string, typ internal.EventType, message []byte) error {
 	tx, err := dbc.Begin()
 	if err != nil {
 		return err

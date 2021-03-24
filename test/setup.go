@@ -1,4 +1,4 @@
-package example
+package test
 
 import (
 	"context"
@@ -9,8 +9,7 @@ import (
 
 	"github.com/corverroos/replay"
 	"github.com/corverroos/replay/client"
-	"github.com/corverroos/replay/db"
-	pb "github.com/corverroos/replay/replaypb"
+	pb "github.com/corverroos/replay/internal/replaypb"
 	"github.com/corverroos/replay/server"
 	"github.com/luno/jettison/interceptors"
 	"github.com/luno/jettison/jtest"
@@ -21,8 +20,7 @@ import (
 
 // SetupForTesting starts a replay grpc server and returns a connected client.
 func SetupForTesting(t *testing.T) (replay.Client, *sql.DB) {
-	db.CleanCache(t)
-	dbc := db.ConnectForTesting(t)
+	dbc := ConnectDB(t)
 	srv, addr := NewServer(t, dbc)
 
 	t.Cleanup(srv.Stop)
@@ -32,12 +30,11 @@ func SetupForTesting(t *testing.T) (replay.Client, *sql.DB) {
 		grpc.WithStreamInterceptor(interceptors.StreamClientInterceptor))
 	jtest.RequireNil(t, err)
 
-	rcl := pb.NewReplayClient(conn)
 	t.Cleanup(func() {
 		require.NoError(t, conn.Close())
 	})
 
-	cl := client.New(rcl)
+	cl := client.New(conn)
 
 	// Wait until connected to avoid startup race.
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*2)

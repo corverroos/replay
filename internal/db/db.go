@@ -1,38 +1,20 @@
 package db
 
 import (
-	"context"
 	"database/sql"
 	"fmt"
 	"strings"
 	"testing"
 
+	"github.com/corverroos/replay"
 	"github.com/corverroos/truss"
 	"github.com/go-sql-driver/mysql"
 	"github.com/luno/jettison/errors"
 	"github.com/luno/jettison/j"
 )
 
-var (
-	ErrNotFound  = errors.New("database entry not found", j.C("ERR_a4d9e7b9eb6b8b0c"))
-	ErrDuplicate = errors.New("duplicate entry", j.C("ERR_96713b1c52c5d59f"))
-)
-
-func Connect(uri string) (*sql.DB, error) {
-	dbc, err := truss.Connect(uri)
-	if err != nil {
-		return nil, err
-	}
-
-	err = truss.Migrate(context.Background(), dbc, migrations)
-	if err != nil {
-		return nil, err
-	}
-
-	return dbc, nil
-}
-
 func ConnectForTesting(t *testing.T) *sql.DB {
+	CleanCache(t)
 	return truss.ConnectForTesting(t, migrations...)
 }
 
@@ -66,5 +48,5 @@ func MaybeWrapErrDuplicate(err error, key string) (error, bool) {
 		return err, false
 	}
 
-	return errors.Wrap(ErrDuplicate, "duplicate for key", j.KS("key", key)), true
+	return errors.Wrap(replay.ErrDuplicate, "duplicate for key", j.KS("key", key)), true
 }
