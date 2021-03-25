@@ -3,6 +3,7 @@ module github.com/corverroos/replay
 go 1.15
 
 require (
+	github.com/corverroos/truss v0.0.0-20210325092544-7695147a5970
 	github.com/go-sql-driver/mysql v1.4.1
 	github.com/golang/protobuf v1.3.3
 	github.com/luno/fate v0.0.0-20191017091315-567fa9070f1c

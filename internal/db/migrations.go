@@ -1,7 +1,7 @@
 package db
 
 var migrations = []string{`
-CREATE TABLE events (
+CREATE TABLE replay_events (
   id BIGINT NOT NULL AUTO_INCREMENT,
   ` + "`key`" + ` VARCHAR(255) NOT NULL,
   workflow VARCHAR(255) NOT NULL DEFAULT "",
@@ -15,7 +15,7 @@ CREATE TABLE events (
   INDEX (type, workflow, run)
 );
 `, `
-CREATE TABLE sleeps (
+CREATE TABLE replay_sleeps (
   id BIGINT NOT NULL AUTO_INCREMENT,
   ` + "`key`" + ` VARCHAR(255) NOT NULL,
   created_at DATETIME(3) NOT NULL,
@@ -27,7 +27,7 @@ CREATE TABLE sleeps (
   INDEX (completed, complete_at)
 );
 `, `
-CREATE TABLE signal_checks (
+CREATE TABLE replay_signal_checks (
   id BIGINT NOT NULL AUTO_INCREMENT,
   ` + "`key`" + ` VARCHAR(255) NOT NULL,
   created_at DATETIME(3) NOT NULL,
@@ -39,7 +39,7 @@ CREATE TABLE signal_checks (
   INDEX (status)
 );
 `, `
-CREATE TABLE signals (
+CREATE TABLE replay_signals (
   id BIGINT NOT NULL AUTO_INCREMENT,
   workflow VARCHAR(255) NOT NULL,
   run VARCHAR(255) NOT NULL,

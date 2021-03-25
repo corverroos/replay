@@ -44,7 +44,7 @@ func Register(ctx context.Context, cl replay.Client, cstore reflex.CursorStore, 
 		req := message.(*replaypb.SleepRequest)
 		completeAt := time.Now().Add(time.Duration(req.Duration.Seconds) * time.Second)
 
-		_, err = dbc.ExecContext(ctx, "insert into sleeps set `key`=?, "+
+		_, err = dbc.ExecContext(ctx, "insert into replay_sleeps set `key`=?, "+
 			"created_at=?, complete_at=?, completed=false", e.ForeignID, time.Now(), completeAt)
 		if _, ok := db.MaybeWrapErrDuplicate(err, "by_key"); ok {
 			return nil
@@ -104,7 +104,7 @@ type sleep struct {
 
 func listToComplete(ctx context.Context, dbc *sql.DB) ([]sleep, error) {
 	rows, err := dbc.QueryContext(ctx, "select id, `key`, created_at, complete_at "+
-		"from sleeps where completed=false order by complete_at asc")
+		"from replay_sleeps where completed=false order by complete_at asc")
 	if err != nil {
 		return nil, err
 	}

@@ -62,7 +62,7 @@ func Register(ctx context.Context, cl replay.Client, cstore reflex.CursorStore, 
 		req := message.(*replaypb.SleepRequest)
 		completeAt := time.Now().Add(time.Duration(req.Duration.Seconds) * time.Second)
 
-		_, err = dbc.ExecContext(ctx, "insert into signal_checks set `key`=?, "+
+		_, err = dbc.ExecContext(ctx, "insert into replay_signal_checks set `key`=?, "+
 			"created_at=?, fail_at=?, status=?", e.ForeignID, time.Now(), completeAt, CheckPending)
 		if _, ok := db.MaybeWrapErrDuplicate(err, "by_key"); ok {
 			return nil
@@ -92,7 +92,7 @@ func Insert(ctx context.Context, dbc *sql.DB, workflow, run string, signalType i
 		}
 	}
 
-	_, err := dbc.ExecContext(ctx, "insert into signals set workflow=?, run=?, type=?, external_id=?, created_at=?, message=? ",
+	_, err := dbc.ExecContext(ctx, "insert into replay_signals set workflow=?, run=?, type=?, external_id=?, created_at=?, message=? ",
 		workflow, run, signalType, externalID, time.Now(), b)
 	if err, ok := db.MaybeWrapErrDuplicate(err, "uniq"); ok {
 		return err
@@ -192,13 +192,13 @@ func lookupSignal(ctx context.Context, dbc *sql.DB, key internal.Key) (id int64,
 	}
 
 	err = dbc.QueryRowContext(ctx, "select id, message "+
-		"from signals where workflow=? and run=? and type=? and check_id is null",
+		"from replay_signals where workflow=? and run=? and type=? and check_id is null",
 		key.Workflow, key.Run, seq.SignalType).Scan(&id, &message)
 	return id, message, err
 }
 
 func failCheck(ctx context.Context, dbc *sql.DB, checkID int64) error {
-	res, err := dbc.ExecContext(ctx, "update signal_checks set status=? where id=? and status=?", CheckFailed, checkID, CheckPending)
+	res, err := dbc.ExecContext(ctx, "update replay_signal_checks set status=? where id=? and status=?", CheckFailed, checkID, CheckPending)
 	if err != nil {
 		return err
 	}
@@ -218,7 +218,7 @@ func completeSignal(ctx context.Context, dbc *sql.DB, signalID, checkID int64) e
 	}
 	defer tx.Rollback()
 
-	res, err := tx.ExecContext(ctx, "update signal_checks set status=? where id=? and status=?", CheckCompleted, checkID, CheckPending)
+	res, err := tx.ExecContext(ctx, "update replay_signal_checks set status=? where id=? and status=?", CheckCompleted, checkID, CheckPending)
 	if err != nil {
 		return err
 	}
@@ -229,7 +229,7 @@ func completeSignal(ctx context.Context, dbc *sql.DB, signalID, checkID int64) e
 		return errors.New("unexpected number of rows updated")
 	}
 
-	res, err = tx.ExecContext(ctx, "update signals set check_id=? where id=? and check_id is null", checkID, signalID)
+	res, err = tx.ExecContext(ctx, "update replay_signals set check_id=? where id=? and check_id is null", checkID, signalID)
 	if err != nil {
 		return err
 	}
@@ -245,7 +245,7 @@ func completeSignal(ctx context.Context, dbc *sql.DB, signalID, checkID int64) e
 
 func listPending(ctx context.Context, dbc *sql.DB) ([]check, error) {
 	rows, err := dbc.QueryContext(ctx, "select id, `key`, status, fail_at "+
-		"from signal_checks where status=? order by fail_at asc", CheckPending)
+		"from replay_signal_checks where status=? order by fail_at asc", CheckPending)
 	if err != nil {
 		return nil, err
 	}

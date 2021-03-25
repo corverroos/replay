@@ -12,7 +12,7 @@ import (
 	"github.com/luno/reflex/rsql"
 )
 
-var events = rsql.NewEventsTable("events",
+var events = rsql.NewEventsTable("replay_events",
 	rsql.WithEventTimeField("timestamp"),
 	rsql.WithEventsInMemNotifier(),
 	rsql.WithEventMetadataField("metadata"),
@@ -40,7 +40,7 @@ func FillGaps(dbc *sql.DB) {
 
 func ListBootstrapEvents(ctx context.Context, dbc *sql.DB, workflow, run string) ([]reflex.Event, error) {
 	rows, err := dbc.QueryContext(ctx, "select id, `key`, type, timestamp, metadata "+
-		"from events where workflow=? and run=? and (type=? or type=?) order by id asc", workflow, run, internal.CreateRun, internal.ActivityResponse)
+		"from replay_events where workflow=? and run=? and (type=? or type=?) order by id asc", workflow, run, internal.CreateRun, internal.ActivityResponse)
 	if err != nil {
 		return nil, err
 	}
@@ -75,7 +75,7 @@ func Insert(ctx context.Context, dbc *sql.DB, key string, typ internal.EventType
 	// Do lookup to avoid creating tons of gaps when replaying long running runs.
 	var exists int
 	err = tx.QueryRowContext(ctx, "select exists("+
-		"select 1 from events where `key` = ? and type = ?)", key, typ).
+		"select 1 from replay_events where `key` = ? and type = ?)", key, typ).
 		Scan(&exists)
 	if err != nil {
 		return err
@@ -108,7 +108,7 @@ func inserter(ctx context.Context, tx *sql.Tx,
 		run.Valid = true
 	}
 
-	_, err = tx.ExecContext(ctx, "insert into events set `key`=?, workflow=?, run=?, "+
+	_, err = tx.ExecContext(ctx, "insert into replay_events set `key`=?, workflow=?, run=?, "+
 		"timestamp=now(3), type=?, metadata=?", key, k.Workflow, run, typ, metadata)
 	return err
 }
