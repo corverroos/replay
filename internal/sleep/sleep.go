@@ -10,10 +10,10 @@ import (
 	"github.com/corverroos/replay/internal/db"
 	"github.com/corverroos/replay/internal/replaypb"
 	"github.com/luno/fate"
+	"github.com/luno/jettison/errors"
 	"github.com/luno/jettison/log"
 	"github.com/luno/reflex"
 	"github.com/luno/reflex/rpatterns"
-	"github.com/pkg/errors"
 )
 
 //go:generate protoc --go_out=plugins=grpc:. ./sleep.proto
