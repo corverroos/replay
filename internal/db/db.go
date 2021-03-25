@@ -1,22 +1,19 @@
 package db
 
 import (
-	"database/sql"
 	"fmt"
 	"strings"
-	"testing"
 
 	"github.com/corverroos/replay"
-	"github.com/corverroos/truss"
 	"github.com/go-sql-driver/mysql"
 	"github.com/luno/jettison/errors"
 	"github.com/luno/jettison/j"
 )
 
-func ConnectForTesting(t *testing.T) *sql.DB {
-	CleanCache(t)
-	return truss.ConnectForTesting(t, migrations...)
-}
+//func ConnectForTesting(t *testing.T) *sql.DB {
+//	CleanCache(t)
+//	return truss.ConnectForTesting(t, migrations...)
+//}
 
 type NoType struct {
 }
