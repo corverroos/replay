@@ -73,7 +73,7 @@ func Register(ctx context.Context, cl replay.Client, cstore reflex.CursorStore, 
 		return nil
 	}
 
-	spec := reflex.NewSpec(cl.Stream, cstore, reflex.NewConsumer(internal.SleepActivity, fn))
+	spec := reflex.NewSpec(cl.Stream, cstore, reflex.NewConsumer(internal.SignalActivity, fn))
 	go rpatterns.RunForever(func() context.Context { return ctx }, spec)
 	go completeChecksForever(ctx, cl, dbc)
 }
