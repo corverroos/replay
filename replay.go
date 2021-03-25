@@ -186,6 +186,7 @@ func (r *runner) StartRun(ctx context.Context, e *reflex.Event, key internal.Key
 				return r.cl.CompleteRun(ctx, r.workflow, key.Run)
 			})
 
+			s.ack <- struct{}{}
 			return
 		}
 	}()
