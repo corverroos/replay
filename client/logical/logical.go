@@ -3,6 +3,7 @@ package logical
 import (
 	"context"
 	"database/sql"
+	"github.com/golang/protobuf/ptypes/any"
 
 	"github.com/corverroos/replay"
 	"github.com/corverroos/replay/internal"
@@ -46,7 +47,16 @@ func (c *Client) RequestActivity(ctx context.Context, key string, message proto.
 }
 
 func (c *Client) CompleteActivity(ctx context.Context, key string, message proto.Message) error {
-	b, err := toBytes(message)
+	apb, err := internal.ToAny(message)
+	if err != nil {
+		return err
+	}
+
+	return c.CompleteActivityRaw(ctx, key, apb)
+}
+
+func (c *Client) CompleteActivityRaw(ctx context.Context, key string, message *any.Any) error {
+	b, err := internal.Marshal(message)
 	if err != nil {
 		return err
 	}
@@ -70,6 +80,8 @@ func toBytes(message proto.Message) ([]byte, error) {
 	apb, err := internal.ToAny(message)
 	if err != nil {
 		return nil, err
+	} else if apb == nil {
+		return nil, nil
 	}
 
 	return proto.Marshal(apb)

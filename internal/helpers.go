@@ -162,9 +162,18 @@ func ToAny(message proto.Message) (*any.Any, error) {
 	return ptypes.MarshalAny(message)
 }
 
+func Marshal(message proto.Message) ([]byte, error) {
+	if message == nil {
+		return nil, nil
+	}
+
+	return proto.Marshal(message)
+}
+
 type Client interface {
 	RequestActivity(ctx context.Context, key string, message proto.Message) error
 	CompleteActivity(ctx context.Context, key string, message proto.Message) error
+	CompleteActivityRaw(ctx context.Context, key string, message *any.Any) error
 	CompleteRun(ctx context.Context, workflow, run string) error
 	ListBootstrapEvents(ctx context.Context, workflow, run string) ([]reflex.Event, error)
 	Stream(ctx context.Context, after string, opts ...reflex.StreamOption) (reflex.StreamClient, error)

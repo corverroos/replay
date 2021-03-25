@@ -10,7 +10,6 @@ import (
 	pb "github.com/corverroos/replay/internal/replaypb"
 	"github.com/corverroos/replay/internal/signal"
 	"github.com/corverroos/replay/internal/sleep"
-	"github.com/golang/protobuf/proto"
 	"github.com/luno/jettison/errors"
 	"github.com/luno/reflex"
 	"github.com/luno/reflex/reflexpb"
@@ -26,7 +25,7 @@ type Server struct {
 }
 
 func (s *Server) RunWorkflow(ctx context.Context, req *pb.RunRequest) (*pb.Empty, error) {
-	b, err := proto.Marshal(req.Message)
+	b, err := internal.Marshal(req.Message)
 	if err != nil {
 		return nil, err
 	}
@@ -39,16 +38,16 @@ func (s *Server) SignalRun(ctx context.Context, req *pb.SignalRequest) (*pb.Empt
 }
 
 func (s *Server) RequestActivity(ctx context.Context, req *pb.ActivityRequest) (*pb.Empty, error) {
-	b, err := proto.Marshal(req.Message)
-	if err != nil {
-		return nil, err
-	}
+		b, err:= internal.Marshal(req.Message)
+		if err != nil {
+			return nil, err
+		}
 
 	return swallowErrDup(db.Insert(ctx, s.dbc, req.Key, internal.ActivityRequest, b))
 }
 
 func (s *Server) CompleteActivity(ctx context.Context, req *pb.ActivityRequest) (*pb.Empty, error) {
-	b, err := proto.Marshal(req.Message)
+	b, err := internal.Marshal(req.Message)
 	if err != nil {
 		return nil, err
 	}

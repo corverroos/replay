@@ -50,13 +50,18 @@ func Register(ctx context.Context, cl replay.Client, cstore reflex.CursorStore, 
 			return nil
 		}
 
-		key, message, err := internal.ParseEvent(e)
+		key, err := internal.DecodeKey(e.ForeignID)
 		if err != nil {
 			return err
 		}
 
 		if key.Activity != internal.SignalActivity {
 			return nil
+		}
+
+		key, message, err := internal.ParseEvent(e)
+		if err != nil {
+			return err
 		}
 
 		req := message.(*replaypb.SleepRequest)
@@ -135,22 +140,14 @@ func completeChecksOnce(ctx context.Context, cl replay.Client, dbc *sql.DB) erro
 			return err
 		}
 
-		var msg proto.Message
+		var a any.Any
 		if len(message) > 0 {
-			var a any.Any
 			if err := proto.Unmarshal(message, &a); err != nil {
 				return errors.Wrap(err, "unmarshal proto")
 			}
-
-			var d ptypes.DynamicAny
-			if err := ptypes.UnmarshalAny(&a, &d); err != nil {
-				return errors.Wrap(err, "unmarshal anypb")
-			}
-
-			msg = d.Message
 		}
 
-		err = cl.CompleteActivity(ctx, c.Key, msg)
+		err = cl.CompleteActivityRaw(ctx, c.Key, &a)
 		if err != nil {
 			return err
 		}

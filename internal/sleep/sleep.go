@@ -32,13 +32,18 @@ func Register(ctx context.Context, cl replay.Client, cstore reflex.CursorStore, 
 			return nil
 		}
 
-		key, message, err := internal.ParseEvent(e)
+		key, err := internal.DecodeKey(e.ForeignID)
 		if err != nil {
 			return err
 		}
 
 		if key.Activity != internal.SleepActivity {
 			return nil
+		}
+
+		key, message, err := internal.ParseEvent(e)
+		if err != nil {
+			return err
 		}
 
 		req := message.(*replaypb.SleepRequest)

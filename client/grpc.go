@@ -2,6 +2,7 @@ package client
 
 import (
 	"context"
+	"github.com/golang/protobuf/ptypes/any"
 
 	"github.com/corverroos/replay"
 	"github.com/corverroos/replay/internal"
@@ -65,17 +66,21 @@ func (c *Client) RequestActivity(ctx context.Context, key string, message proto.
 	return err
 }
 
+func (c *Client) CompleteActivityRaw(ctx context.Context, key string, message *any.Any) error {
+	_, err := c.clpb.CompleteActivity(ctx, &pb.ActivityRequest{
+		Key:     key,
+		Message: message,
+	})
+	return err
+}
+
 func (c *Client) CompleteActivity(ctx context.Context, key string, message proto.Message) error {
 	anyMsg, err := internal.ToAny(message)
 	if err != nil {
 		return err
 	}
 
-	_, err = c.clpb.CompleteActivity(ctx, &pb.ActivityRequest{
-		Key:     key,
-		Message: anyMsg,
-	})
-	return err
+	return c.CompleteActivityRaw(ctx, key, anyMsg)
 }
 
 func (c *Client) CompleteRun(ctx context.Context, workflow, run string) error {
