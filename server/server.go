@@ -38,10 +38,10 @@ func (s *Server) SignalRun(ctx context.Context, req *pb.SignalRequest) (*pb.Empt
 }
 
 func (s *Server) RequestActivity(ctx context.Context, req *pb.ActivityRequest) (*pb.Empty, error) {
-		b, err:= internal.Marshal(req.Message)
-		if err != nil {
-			return nil, err
-		}
+	b, err := internal.Marshal(req.Message)
+	if err != nil {
+		return nil, err
+	}
 
 	return swallowErrDup(db.Insert(ctx, s.dbc, req.Key, internal.ActivityRequest, b))
 }

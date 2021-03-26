@@ -3,13 +3,13 @@ package logical
 import (
 	"context"
 	"database/sql"
-	"github.com/golang/protobuf/ptypes/any"
 
 	"github.com/corverroos/replay"
 	"github.com/corverroos/replay/internal"
 	"github.com/corverroos/replay/internal/db"
 	"github.com/corverroos/replay/internal/signal"
 	"github.com/golang/protobuf/proto"
+	"github.com/golang/protobuf/ptypes/any"
 	"github.com/luno/jettison/errors"
 	"github.com/luno/reflex"
 )
@@ -34,7 +34,12 @@ func (c *Client) RunWorkflow(ctx context.Context, workflow, run string, message 
 }
 
 func (c *Client) SignalRun(ctx context.Context, workflow, run string, s replay.Signal, message proto.Message, extID string) error {
-	return signal.Insert(ctx, c.dbc, workflow, run, s.SignalType(), message, extID)
+	apb, err := internal.ToAny(message)
+	if err != nil {
+		return err
+	}
+
+	return signal.Insert(ctx, c.dbc, workflow, run, s.SignalType(), apb, extID)
 }
 
 func (c *Client) RequestActivity(ctx context.Context, key string, message proto.Message) error {

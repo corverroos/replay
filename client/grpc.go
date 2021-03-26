@@ -2,12 +2,12 @@ package client
 
 import (
 	"context"
-	"github.com/golang/protobuf/ptypes/any"
 
 	"github.com/corverroos/replay"
 	"github.com/corverroos/replay/internal"
 	pb "github.com/corverroos/replay/internal/replaypb"
 	"github.com/golang/protobuf/proto"
+	"github.com/golang/protobuf/ptypes/any"
 	"github.com/luno/reflex"
 	"github.com/luno/reflex/reflexpb"
 	"google.golang.org/grpc"
