@@ -10,7 +10,6 @@ import (
 	"github.com/corverroos/replay/internal/db"
 	"github.com/corverroos/replay/internal/replaypb"
 	"github.com/golang/protobuf/proto"
-	"github.com/golang/protobuf/ptypes"
 	"github.com/golang/protobuf/ptypes/any"
 	"github.com/luno/fate"
 	"github.com/luno/jettison/errors"
@@ -83,21 +82,13 @@ func Register(ctx context.Context, cl replay.Client, cstore reflex.CursorStore, 
 	go completeChecksForever(ctx, cl, dbc)
 }
 
-func Insert(ctx context.Context, dbc *sql.DB, workflow, run string, signalType int, message proto.Message, externalID string) error {
-	var b []byte
-	if message != nil {
-		any, err := ptypes.MarshalAny(message)
-		if err != nil {
-			return err
-		}
-
-		b, err = proto.Marshal(any)
-		if err != nil {
-			return err
-		}
+func Insert(ctx context.Context, dbc *sql.DB, workflow, run string, signalType int, message *any.Any, externalID string) error {
+	b, err := proto.Marshal(message)
+	if err != nil {
+		return err
 	}
 
-	_, err := dbc.ExecContext(ctx, "insert into replay_signals set workflow=?, run=?, type=?, external_id=?, created_at=?, message=? ",
+	_, err = dbc.ExecContext(ctx, "insert into replay_signals set workflow=?, run=?, type=?, external_id=?, created_at=?, message=? ",
 		workflow, run, signalType, externalID, time.Now(), b)
 	if err, ok := db.MaybeWrapErrDuplicate(err, "uniq"); ok {
 		return err
