@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"testing"
-	"time"
 
 	"github.com/corverroos/replay/internal"
 	"github.com/luno/jettison/errors"
@@ -18,7 +17,6 @@ var events = rsql.NewEventsTable("replay_events",
 	rsql.WithEventMetadataField("metadata"),
 	rsql.WithEventForeignIDField("`key`"),
 	rsql.WithEventsInserter(inserter),
-	rsql.WithEventsBackoff(time.Millisecond*100),
 )
 
 // ToStream returns a reflex stream for the events.
