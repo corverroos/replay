@@ -194,8 +194,9 @@ func (r *runner) StartRun(ctx context.Context, e *reflex.Event, key internal.Key
 				err = errors.New("run panic", j.KV("panic", r))
 			}
 
-			if err == nil {
+			if err != nil {
 				log.Error(ctx, err, j.MKV{"key": key.Encode()})
+				// NoReturnErr: Return via ack chan.
 				select {
 				case s.ack <- err:
 				default:
