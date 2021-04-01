@@ -22,6 +22,7 @@ import (
 )
 
 var ErrDuplicate = errors.New("duplicate entry", j.C("ERR_96713b1c52c5d59f"))
+var abort = struct{}{}
 
 type Client interface {
 	internal.Client // Internal client methods only for use by this package.
@@ -115,7 +116,7 @@ type runState struct {
 	mu        sync.Mutex
 	indexes   map[string]int
 	responses map[internal.Key]chan response
-	ack       chan struct{}
+	ack       chan error
 }
 
 type response struct {
@@ -123,14 +124,14 @@ type response struct {
 	event   *reflex.Event
 }
 
-func (s *runState) RespondActivity(e *reflex.Event, key internal.Key, message proto.Message) {
+func (s *runState) RespondActivity(e *reflex.Event, key internal.Key, message proto.Message) error {
 	s.mu.Lock()
 	if _, ok := s.responses[key]; !ok {
 		s.responses[key] = make(chan response)
 	}
 	s.mu.Unlock()
 	s.responses[key] <- response{event: e, message: message}
-	<-s.ack
+	return <-s.ack
 }
 
 func (s *runState) GetAndInc(activity string) int {
@@ -143,14 +144,20 @@ func (s *runState) GetAndInc(activity string) int {
 	return s.indexes[activity]
 }
 
-func (s *runState) AwaitActivity(key internal.Key) response {
+func (s *runState) AwaitActivity(ctx context.Context, key internal.Key) response {
 	s.mu.Lock()
 	if _, ok := s.responses[key]; !ok {
 		s.responses[key] = make(chan response)
 	}
 	s.mu.Unlock()
-	s.ack <- struct{}{}
-	return <-s.responses[key]
+	s.ack <- nil
+
+	select {
+	case <-ctx.Done():
+		panic(abort)
+	case r := <-s.responses[key]:
+		return r
+	}
 }
 
 type runner struct {
@@ -174,11 +181,28 @@ func (r *runner) StartRun(ctx context.Context, e *reflex.Event, key internal.Key
 	s := &runState{
 		responses: make(map[internal.Key]chan response),
 		indexes:   make(map[string]int),
-		ack:       make(chan struct{}),
+		ack:       make(chan error),
 	}
 	r.runs[key.Run] = s
 
 	go func() {
+		defer func() {
+			var err error
+			if r := recover(); r == abort {
+				err = errors.New("run aborted")
+			} else if r != nil {
+				err = errors.New("run panic", j.KV("panic", r))
+			}
+
+			if err == nil {
+				log.Error(ctx, err, j.MKV{"key": key.Encode()})
+				select {
+				case s.ack <- err:
+				default:
+				}
+			}
+		}()
+
 		for {
 			r.run(ctx, e, key.Run, args, s)
 
@@ -186,13 +210,12 @@ func (r *runner) StartRun(ctx context.Context, e *reflex.Event, key internal.Key
 				return r.cl.CompleteRun(ctx, r.workflow, key.Run)
 			})
 
-			s.ack <- struct{}{}
+			s.ack <- nil
 			return
 		}
 	}()
 
-	<-s.ack
-	return nil
+	return <-s.ack
 }
 
 func (r *runner) bootstrapRun(ctx context.Context, run string, upTo int64) error {
@@ -290,7 +313,7 @@ func (c *RunContext) ExecActivity(activityFunc interface{}, args proto.Message) 
 		return c.cl.RequestActivity(c, key.Encode(), args)
 	})
 
-	res := c.state.AwaitActivity(key)
+	res := c.state.AwaitActivity(c, key)
 	c.lastEvent = res.event
 	return res.message
 }
@@ -314,7 +337,7 @@ func (c *RunContext) AwaitSignal(s Signal, duration time.Duration) (proto.Messag
 		})
 	})
 
-	res := c.state.AwaitActivity(key)
+	res := c.state.AwaitActivity(c, key)
 	c.lastEvent = res.event
 	if _, ok := res.message.(*replaypb.SleepDone); ok {
 		return nil, false
@@ -338,7 +361,7 @@ func (c *RunContext) Sleep(duration time.Duration) {
 		})
 	})
 
-	c.state.AwaitActivity(key)
+	c.state.AwaitActivity(c, key)
 }
 
 func (c *RunContext) CreateEvent() *reflex.Event {
@@ -372,7 +395,10 @@ func getFunctionName(i interface{}) string {
 func ensure(ctx context.Context, fn func() error) {
 	for {
 		err := fn()
-		if err != nil {
+		if ctx.Err() != nil {
+			panic(abort)
+		} else if err != nil {
+			// NoReturnErr: Log and try again.
 			log.Error(ctx, errors.Wrap(err, "ensure"))
 			time.Sleep(time.Second)
 			continue
