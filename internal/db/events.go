@@ -31,11 +31,6 @@ func CleanCache(t *testing.T) {
 	})
 }
 
-// FillGaps registers the default gap filler for the action events table.
-func FillGaps(dbc *sql.DB) {
-	rsql.FillGaps(dbc, events)
-}
-
 func ListBootstrapEvents(ctx context.Context, dbc *sql.DB, workflow, run string) ([]reflex.Event, error) {
 	rows, err := dbc.QueryContext(ctx, "select id, `key`, type, timestamp, metadata "+
 		"from replay_events where workflow=? and run=? and (type=? or type=?) order by id asc", workflow, run, internal.CreateRun, internal.ActivityResponse)
