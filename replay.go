@@ -266,10 +266,10 @@ func (r *runner) RespondActivity(ctx context.Context, e *reflex.Event, key inter
 		return r.bootstrapRun(ctx, key.Run, e.IDInt())
 	}
 
-	r.runs[key.Run].RespondActivity(e, key, message)
+	err := r.runs[key.Run].RespondActivity(e, key, message)
 
 	r.Unlock()
-	return nil
+	return err
 }
 
 func (r *runner) run(ctx context.Context, e *reflex.Event, run string, args proto.Message, state *runState) {
