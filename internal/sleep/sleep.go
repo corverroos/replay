@@ -52,7 +52,7 @@ func Register(ctx context.Context, cl replay.Client, cstore reflex.CursorStore, 
 		_, err = dbc.ExecContext(ctx, "insert into replay_sleeps set `key`=?, "+
 			"created_at=?, complete_at=?, completed=false", e.ForeignID, time.Now(), completeAt)
 		if _, ok := db.MaybeWrapErrDuplicate(err, "by_key"); ok {
-			return nil
+			// Record already exists. Continue.
 		} else if err != nil {
 			return err
 		}

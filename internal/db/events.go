@@ -77,9 +77,7 @@ func Insert(ctx context.Context, dbc *sql.DB, key string, typ internal.EventType
 	}
 
 	notify, err := events.InsertWithMetadata(ctx, tx, key, typ, message)
-	if _, ok := MaybeWrapErrDuplicate(err, "by_type_key"); ok {
-		return err
-	} else if err != nil {
+	if err, ok := MaybeWrapErrDuplicate(err, "by_type_key"); ok {
 		return errors.Wrap(err, "insert")
 	}
 	defer notify()
