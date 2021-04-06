@@ -23,10 +23,10 @@ func RegisterForTesting(ctx context.Context, cl replay.Client, cstore reflex.Cur
 	shouldComplete = func(completeAt time.Time) bool {
 		return true
 	}
-	Register(ctx, cl, cstore, dbc)
+	Register(func() context.Context { return ctx }, cl, cstore, dbc)
 }
 
-func Register(ctx context.Context, cl replay.Client, cstore reflex.CursorStore, dbc *sql.DB) {
+func Register(getCtx func() context.Context, cl replay.Client, cstore reflex.CursorStore, dbc *sql.DB) {
 	fn := func(ctx context.Context, f fate.Fate, e *reflex.Event) error {
 		if !reflex.IsType(e.Type, internal.ActivityRequest) {
 			return nil
@@ -61,12 +61,14 @@ func Register(ctx context.Context, cl replay.Client, cstore reflex.CursorStore, 
 	}
 
 	spec := reflex.NewSpec(cl.Stream, cstore, reflex.NewConsumer(internal.SleepActivity, fn))
-	go rpatterns.RunForever(func() context.Context { return ctx }, spec)
-	go completeSleepsForever(ctx, cl, dbc)
+	go rpatterns.RunForever(getCtx, spec)
+	go completeSleepsForever(getCtx, cl, dbc)
 }
 
-func completeSleepsForever(ctx context.Context, cl replay.Client, dbc *sql.DB) {
+func completeSleepsForever(getCtx func() context.Context, cl replay.Client, dbc *sql.DB) {
 	for {
+		ctx := getCtx()
+
 		err := completeSleepsOnce(ctx, cl, dbc)
 		if err != nil {
 			log.Error(ctx, errors.Wrap(err, "complete sleeps once"))

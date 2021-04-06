@@ -40,10 +40,10 @@ func RegisterForTesting(ctx context.Context, cl replay.Client, cstore reflex.Cur
 	shouldComplete = func(completeAt time.Time) bool {
 		return true
 	}
-	Register(ctx, cl, cstore, dbc)
+	Register(func() context.Context { return ctx }, cl, cstore, dbc)
 }
 
-func Register(ctx context.Context, cl replay.Client, cstore reflex.CursorStore, dbc *sql.DB) {
+func Register(getCtx func() context.Context, cl replay.Client, cstore reflex.CursorStore, dbc *sql.DB) {
 	fn := func(ctx context.Context, f fate.Fate, e *reflex.Event) error {
 		if !reflex.IsType(e.Type, internal.ActivityRequest) {
 			return nil
@@ -78,8 +78,8 @@ func Register(ctx context.Context, cl replay.Client, cstore reflex.CursorStore, 
 	}
 
 	spec := reflex.NewSpec(cl.Stream, cstore, reflex.NewConsumer(internal.SignalActivity, fn))
-	go rpatterns.RunForever(func() context.Context { return ctx }, spec)
-	go completeChecksForever(ctx, cl, dbc)
+	go rpatterns.RunForever(getCtx, spec)
+	go completeChecksForever(getCtx, cl, dbc)
 }
 
 func Insert(ctx context.Context, dbc *sql.DB, workflow, run string, signalType int, message *any.Any, externalID string) error {
@@ -99,8 +99,10 @@ func Insert(ctx context.Context, dbc *sql.DB, workflow, run string, signalType i
 	return nil
 }
 
-func completeChecksForever(ctx context.Context, cl replay.Client, dbc *sql.DB) {
+func completeChecksForever(getCtx func() context.Context, cl replay.Client, dbc *sql.DB) {
 	for {
+		ctx := getCtx()
+
 		err := completeChecksOnce(ctx, cl, dbc)
 		if err != nil {
 			log.Error(ctx, errors.Wrap(err, "complete sleeps once"))

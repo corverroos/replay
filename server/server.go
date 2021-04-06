@@ -97,9 +97,9 @@ func Register(s *grpc.Server, srv pb.ReplayServer) {
 	pb.RegisterReplayServer(s, srv)
 }
 
-func StartLoops(ctx context.Context, cl replay.Client, cstore reflex.CursorStore, dbc *sql.DB) {
-	sleep.Register(ctx, cl, cstore, dbc)
-	signal.Register(ctx, cl, cstore, dbc)
+func StartLoops(getCtx func() context.Context, cl replay.Client, cstore reflex.CursorStore, dbc *sql.DB) {
+	sleep.Register(getCtx, cl, cstore, dbc)
+	signal.Register(getCtx, cl, cstore, dbc)
 	db.FillGaps(dbc)
 }
 
