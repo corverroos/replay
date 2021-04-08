@@ -32,7 +32,7 @@ const ErrDupEntry = 1062
 // unique index or primary key. Otherwise it returns the provided error and false.
 func MaybeWrapErrDuplicate(err error, key string) (error, bool) {
 	if err == nil {
-		return err, false
+		return nil, false
 	}
 
 	me := new(mysql.MySQLError)

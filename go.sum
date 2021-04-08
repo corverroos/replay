@@ -110,8 +110,8 @@ github.com/luno/jettison v0.0.0-20190815135910-8324430a089d/go.mod h1:tOyVRFDlkZ
 github.com/luno/jettison v0.0.0-20200605102849-c5d1ad291332/go.mod h1:IVntidW2Z2luwfdIpwgvUZSwnRk82RRPfoj0h2P7W+c=
 github.com/luno/jettison v0.0.0-20210218093327-95083f929b49 h1:rNUFSdE2zBVyhIQuIMpx8CZ3xGPnC0ufAxGIgpUNfC8=
 github.com/luno/jettison v0.0.0-20210218093327-95083f929b49/go.mod h1:IVntidW2Z2luwfdIpwgvUZSwnRk82RRPfoj0h2P7W+c=
-github.com/luno/reflex v0.0.0-20210318092057-bb9ae4bb0460 h1:o7+ChhpGxUjBCBn2lBDqAWP1L+z1O3qHeMujzandk88=
-github.com/luno/reflex v0.0.0-20210318092057-bb9ae4bb0460/go.mod h1:ihs/9oisfw7BeAncqryv8/ebQK4aXvg614TJPveyZ0w=
+github.com/luno/reflex v0.0.0-20210408070502-f193b7e1c601 h1:4Qo1dbexqyIEye4fIEBrGO86He8fwg+Jwun7Td13Vx4=
+github.com/luno/reflex v0.0.0-20210408070502-f193b7e1c601/go.mod h1:ihs/9oisfw7BeAncqryv8/ebQK4aXvg614TJPveyZ0w=
 github.com/mattn/go-colorable v0.1.2/go.mod h1:U0ppj6V5qS13XJ6of8GYAs25YV2eR4EVcfRqFIhoBtE=
 github.com/mattn/go-ieproxy v0.0.0-20190610004146-91bb50d98149/go.mod h1:31jz6HNzdxOmlERGGEc4v/dMssOfmp2p5bT/okiKFFc=
 github.com/mattn/go-isatty v0.0.8/go.mod h1:Iq45c/XA43vh69/j3iqttzPXn0bhXyGjM0Hdxcsrc5s=

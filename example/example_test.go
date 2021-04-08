@@ -22,7 +22,6 @@ import (
 func TestExample(t *testing.T) {
 	dbc := test.ConnectDB(t)
 	cl := logical.New(dbc)
-	ctx := context.Background()
 	cstore := new(test.MemCursorStore)
 	completeChan := make(chan string)
 	tcl := &testClient{
@@ -31,9 +30,9 @@ func TestExample(t *testing.T) {
 	}
 	var b Backends
 
-	replay.RegisterActivity(ctx, cl, cstore, b, EnrichGreeting)
-	replay.RegisterActivity(ctx, cl, cstore, b, PrintGreeting)
-	replay.RegisterWorkflow(ctx, tcl, cstore, GreetingWorkflow)
+	replay.RegisterActivity(testCtx(t), cl, cstore, b, EnrichGreeting)
+	replay.RegisterActivity(testCtx(t), cl, cstore, b, PrintGreeting)
+	replay.RegisterWorkflow(testCtx(t), tcl, cstore, GreetingWorkflow)
 
 	err := cl.RunWorkflow(context.Background(), "GreetingWorkflow", t.Name(), &String{Value: "World"})
 	jtest.RequireNil(t, err)
@@ -55,9 +54,9 @@ func TestExampleReplay(t *testing.T) {
 	}
 
 	var b Backends
-	replay.RegisterActivity(ctx, cl, cstore, b, EnrichGreeting)
-	replay.RegisterActivity(ctx, cl, cstore, b, PrintGreeting)
-	replay.RegisterWorkflow(ctx, tcl1, cstore, GreetingWorkflow) // This workflow will block right before ctx.ExecActivity(PrintGreeting, name)
+	replay.RegisterActivity(testCtx(t), cl, cstore, b, EnrichGreeting)
+	replay.RegisterActivity(testCtx(t), cl, cstore, b, PrintGreeting)
+	replay.RegisterWorkflow(testCtx(t), tcl1, cstore, GreetingWorkflow) // This workflow will block right before ctx.ExecActivity(PrintGreeting, name)
 
 	err := cl.RunWorkflow(context.Background(), "GreetingWorkflow", t.Name(), &String{Value: "World"})
 	jtest.RequireNil(t, err)
@@ -70,7 +69,7 @@ func TestExampleReplay(t *testing.T) {
 		Client:       cl,
 		completeChan: completeChan,
 	}
-	replay.RegisterWorkflow(ctx, tcl2, cstore, GreetingWorkflow) // This workflow will bootstrap and continue after ctx.ExecActivity(PrintGreeting, name)
+	replay.RegisterWorkflow(testCtx(t), tcl2, cstore, GreetingWorkflow) // This workflow will bootstrap and continue after ctx.ExecActivity(PrintGreeting, name)
 	run := <-completeChan
 
 	el, err := cl.ListBootstrapEvents(ctx, "GreetingWorkflow", run)
@@ -91,8 +90,8 @@ func TestExampleSleep(t *testing.T) {
 
 	b := Backends{Replay: cl}
 	test.RegisterNoopSleeps(ctx, cl, cstore, dbc)
-	replay.RegisterActivity(ctx, cl, cstore, b, PrintGreeting)
-	replay.RegisterWorkflow(ctx, tcl, cstore, SleepWorkflow)
+	replay.RegisterActivity(testCtx(t), cl, cstore, b, PrintGreeting)
+	replay.RegisterWorkflow(testCtx(t), tcl, cstore, SleepWorkflow)
 
 	err := cl.RunWorkflow(ctx, "SleepWorkflow", t.Name(), new(Empty))
 	jtest.RequireNil(t, err)
@@ -114,9 +113,9 @@ func TestExampleSignal(t *testing.T) {
 	b := Backends{Replay: cl}
 
 	test.RegisterNoSleepSignals(ctx, cl, cstore, dbc)
-	replay.RegisterActivity(ctx, cl, cstore, b, MaybeSignal)
-	replay.RegisterActivity(ctx, cl, cstore, b, PrintGreeting)
-	replay.RegisterWorkflow(ctx, tcl, cstore, SignalWorkflow)
+	replay.RegisterActivity(testCtx(t), cl, cstore, b, MaybeSignal)
+	replay.RegisterActivity(testCtx(t), cl, cstore, b, PrintGreeting)
+	replay.RegisterWorkflow(testCtx(t), tcl, cstore, SignalWorkflow)
 
 	err := cl.RunWorkflow(ctx, "SignalWorkflow", "test", new(Empty))
 	jtest.RequireNil(t, err)
@@ -126,7 +125,6 @@ func TestExampleSignal(t *testing.T) {
 
 func TestExampleGRPC(t *testing.T) {
 	cl, _ := test.SetupForTesting(t)
-	ctx := context.Background()
 	cstore := new(test.MemCursorStore)
 	completeChan := make(chan string)
 	tcl := &testClient{
@@ -135,9 +133,9 @@ func TestExampleGRPC(t *testing.T) {
 	}
 	var b Backends
 
-	replay.RegisterActivity(ctx, cl, cstore, b, EnrichGreeting)
-	replay.RegisterActivity(ctx, cl, cstore, b, PrintGreeting)
-	replay.RegisterWorkflow(ctx, tcl, cstore, GreetingWorkflow)
+	replay.RegisterActivity(testCtx(t), cl, cstore, b, EnrichGreeting)
+	replay.RegisterActivity(testCtx(t), cl, cstore, b, PrintGreeting)
+	replay.RegisterWorkflow(testCtx(t), tcl, cstore, GreetingWorkflow)
 
 	err := cl.RunWorkflow(context.Background(), "GreetingWorkflow", t.Name(), &String{Value: "World"})
 	jtest.RequireNil(t, err)
@@ -234,4 +232,19 @@ func (c *testClient) RequestActivity(ctx context.Context, key string, args proto
 	}
 
 	return c.Client.RequestActivity(ctx, key, args)
+}
+
+func testCtx(t *testing.T) func() context.Context {
+	var n int
+	return func() context.Context {
+		if n > 0 {
+			time.Sleep(time.Hour)
+		}
+		n++
+		ctx, cancel := context.WithCancel(context.Background())
+		t.Cleanup(func() {
+			cancel()
+		})
+		return ctx
+	}
 }

@@ -36,7 +36,7 @@ type Signal interface {
 	MessageType() proto.Message
 }
 
-func RegisterActivity(ctx context.Context, cl Client, cstore reflex.CursorStore, backends interface{}, activityFunc interface{}) {
+func RegisterActivity(getCtx func() context.Context, cl Client, cstore reflex.CursorStore, backends interface{}, activityFunc interface{}) {
 	activity := getFunctionName(activityFunc)
 
 	fn := func(ctx context.Context, f fate.Fate, e *reflex.Event) error {
@@ -67,10 +67,10 @@ func RegisterActivity(ctx context.Context, cl Client, cstore reflex.CursorStore,
 	}
 
 	spec := reflex.NewSpec(cl.Stream, cstore, reflex.NewConsumer(activity, fn))
-	go rpatterns.RunForever(func() context.Context { return ctx }, spec)
+	go rpatterns.RunForever(getCtx, spec)
 }
 
-func RegisterWorkflow(ctx context.Context, cl Client, cstore reflex.CursorStore, workflowFunc interface{}) {
+func RegisterWorkflow(getCtx func() context.Context, cl Client, cstore reflex.CursorStore, workflowFunc interface{}) {
 	workflow := getFunctionName(workflowFunc) // TODO(corver): Prefix service name.
 
 	// TODO(corver): Validate workflowfunc signature.
@@ -109,7 +109,7 @@ func RegisterWorkflow(ctx context.Context, cl Client, cstore reflex.CursorStore,
 	}
 
 	spec := reflex.NewSpec(cl.Stream, cstore, reflex.NewConsumer(workflow, fn))
-	go rpatterns.RunForever(func() context.Context { return ctx }, spec)
+	go rpatterns.RunForever(getCtx, spec)
 }
 
 type runState struct {
@@ -204,16 +204,14 @@ func (r *runner) StartRun(ctx context.Context, e *reflex.Event, key internal.Key
 			}
 		}()
 
-		for {
-			r.run(ctx, e, key.Run, args, s)
+		r.run(ctx, e, key.Run, args, s)
 
-			ensure(ctx, func() error {
-				return r.cl.CompleteRun(ctx, r.workflow, key.Run)
-			})
+		ensure(ctx, func() error {
+			return r.cl.CompleteRun(ctx, r.workflow, key.Run)
+		})
 
-			s.ack <- nil
-			return
-		}
+		s.ack <- nil
+		return
 	}()
 
 	return <-s.ack

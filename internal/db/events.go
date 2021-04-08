@@ -7,6 +7,7 @@ import (
 
 	"github.com/corverroos/replay/internal"
 	"github.com/luno/jettison/errors"
+	"github.com/luno/jettison/j"
 	"github.com/luno/reflex"
 	"github.com/luno/reflex/rsql"
 )
@@ -79,6 +80,8 @@ func Insert(ctx context.Context, dbc *sql.DB, key string, typ internal.EventType
 	notify, err := events.InsertWithMetadata(ctx, tx, key, typ, message)
 	if err, ok := MaybeWrapErrDuplicate(err, "by_type_key"); ok {
 		return errors.Wrap(err, "insert")
+	} else if err != nil {
+		return err
 	}
 	defer notify()
 
@@ -91,6 +94,10 @@ func inserter(ctx context.Context, tx *sql.Tx,
 	k, err := internal.DecodeKey(key)
 	if err != nil {
 		return err
+	}
+
+	if k.Run == "" && reflex.IsAnyType(typ, internal.ActivityRequest, internal.ActivityResponse) {
+		return errors.New("activity missing run", j.KS("key", key))
 	}
 
 	var run sql.NullString
