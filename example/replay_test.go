@@ -49,6 +49,17 @@ func TestActivityFunc(t *testing.T) {
 					return nil, nil
 				})
 		})
+
+	require.PanicsWithError(t,
+		"invalid activity function, output parameters not "+
+			"proto.Message, error: "+
+			"func(context.Context, example.Backends, fate.Fate, *example.Empty) (example.Backends, error)",
+		func() {
+			replay.RegisterActivity(nil, nil, nil, nil,
+				func(context.Context, Backends, fate.Fate, *Empty) (Backends, error) {
+					return Backends{}, nil
+				})
+		})
 }
 
 func TestActivityErr(t *testing.T) {
