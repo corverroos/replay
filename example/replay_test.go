@@ -9,6 +9,7 @@ import (
 	"github.com/corverroos/replay"
 	"github.com/corverroos/replay/client/logical"
 	"github.com/corverroos/replay/test"
+	"github.com/luno/fate"
 	"github.com/luno/jettison/jtest"
 	"github.com/stretchr/testify/require"
 )
@@ -35,6 +36,51 @@ func TestNoopWorkflow(t *testing.T) {
 		jtest.RequireNil(t, err)
 		require.Equal(t, run, <-completeChan)
 	}
+}
+
+func TestActivityFunc(t *testing.T) {
+	require.PanicsWithError(t,
+		"activity function must have 4 input parameters: context.Context, interface{}, fate.Fate, proto.Message; func(context.Context, fate.Fate, example.Backends, *example.Empty) (*example.Empty, error)",
+		func() {
+			replay.RegisterActivity(nil, nil, nil, nil,
+				func(context.Context, fate.Fate, Backends, *Empty) (*Empty, error) {
+					return nil, nil
+				})
+		})
+}
+
+func TestActivityErr(t *testing.T) {
+	dbc := test.ConnectDB(t)
+	ctx := context.Background()
+	cl := logical.New(dbc)
+	cstore := new(test.MemCursorStore)
+
+	var i int
+	activity := func(context.Context, Backends, fate.Fate, *Empty) (*Empty, error) {
+		i++
+		if i > 1 {
+			return new(Empty), nil
+		}
+		return nil, fate.ErrTempt
+	}
+	workflow := func(ctx replay.RunContext, _ *Empty) {
+		ctx.ExecActivity(activity, new(Empty), replay.WithName("act"))
+	}
+	name := "test"
+
+	completeChan := make(chan string)
+	tcl := &testClient{
+		Client:       cl,
+		completeChan: completeChan,
+	}
+	replay.RegisterWorkflow(testCtx(t), tcl, cstore, workflow, replay.WithName(name))
+	replay.RegisterActivity(func() context.Context { return context.Background() },
+		tcl, cstore, Backends{}, activity, replay.WithName("act"))
+
+	err := cl.RunWorkflow(ctx, name, "test", new(Empty))
+	jtest.RequireNil(t, err)
+	require.Equal(t, "test", <-completeChan)
+	require.Equal(t, 2, i)
 }
 
 func TestIdenticalReplay(t *testing.T) {

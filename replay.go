@@ -54,6 +54,10 @@ type Signal interface {
 
 // RegisterActivity starts a activity consumer that consumes replay events and executes the activity if requested.
 func RegisterActivity(getCtx func() context.Context, cl Client, cstore reflex.CursorStore, backends interface{}, activityFunc interface{}, opts ...option) {
+	if err := validateActivity(activityFunc); err != nil {
+		panic(err)
+	}
+
 	o := defaultOptions()
 	for _, opt := range opts {
 		opt(&o)
@@ -88,9 +92,11 @@ func RegisterActivity(getCtx func() context.Context, cl Client, cstore reflex.Cu
 
 		respVals := reflect.ValueOf(activityFunc).Call(args)
 
-		resp := respVals[0].Interface().(proto.Message)
-		// TODO(corver): Handle activity errors.
-		return cl.RespondActivity(ctx, e.ForeignID, resp)
+		if !respVals[1].IsNil() {
+			return respVals[1].Interface().(error)
+		}
+
+		return cl.RespondActivity(ctx, e.ForeignID, respVals[0].Interface().(proto.Message))
 	}
 
 	spec := reflex.NewSpec(cl.Stream, cstore, reflex.NewConsumer(activity, fn))
@@ -366,8 +372,17 @@ type RunContext struct {
 	lastEvent   *reflex.Event
 }
 
-func (c *RunContext) ExecActivity(activityFunc interface{}, args proto.Message) proto.Message {
-	activity := getFunctionName(activityFunc)
+func (c *RunContext) ExecActivity(activityFunc interface{}, args proto.Message, opts ...option) proto.Message {
+	if err := validateActivity(activityFunc); err != nil {
+		panic(err)
+	}
+
+	o := defaultOptions()
+	for _, opt := range opts {
+		opt(&o)
+	}
+	activity := o.nameFunc(activityFunc)
+
 	index := c.state.GetAndInc(activity)
 	key := internal.Key{
 		Workflow: c.workflow,
@@ -473,3 +488,41 @@ func ensure(ctx context.Context, fn func() error) {
 		return
 	}
 }
+
+func validateActivity(activityFunc interface{}) error {
+	if activityFunc == nil {
+		return errors.New("nil activity function")
+	}
+
+	check := func(num func() int, get func(int) reflect.Type, types ...reflect.Type) bool {
+		if num() != len(types) {
+			return false
+		}
+		for i, typ := range types {
+			if !get(i).Implements(typ) {
+				return false
+			}
+		}
+		return true
+	}
+
+	t := reflect.TypeOf(activityFunc)
+
+	if t.Kind() != reflect.Func {
+		return errors.New("non-function activity function")
+	} else if !check(t.NumIn, t.In, ctxType, anyType, fateType, protoType) {
+		return errors.New("activity function must have 4 input parameters: " +
+			"context.Context, interface{}, fate.Fate, proto.Message; " + t.String())
+	} else if !check(t.NumOut, t.Out, protoType, errorType) {
+		return errors.New("activity function must have 2 output parameters: " +
+			"proto.Message, error; " + t.String())
+	}
+
+	return nil
+}
+
+var ctxType = reflect.TypeOf((*context.Context)(nil)).Elem()
+var fateType = reflect.TypeOf((*fate.Fate)(nil)).Elem()
+var protoType = reflect.TypeOf((*proto.Message)(nil)).Elem()
+var errorType = reflect.TypeOf((*error)(nil)).Elem()
+var anyType = reflect.TypeOf((*interface{})(nil)).Elem()
