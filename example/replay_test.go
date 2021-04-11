@@ -62,6 +62,27 @@ func TestActivityFunc(t *testing.T) {
 		})
 }
 
+func TestWorkflowFunc(t *testing.T) {
+	require.PanicsWithError(t,
+		"invalid workflow function, input parameters not "+
+			"replay.RunContext, proto.Message: "+
+			"func(context.Context, *example.Empty)",
+		func() {
+			replay.RegisterWorkflow(nil, nil, nil,
+				func(context.Context, *Empty) {})
+		})
+
+	require.PanicsWithError(t,
+		"invalid workflow function, output parameters not empty: "+
+			"func(replay.RunContext, *example.Empty) error",
+		func() {
+			replay.RegisterWorkflow(nil, nil, nil,
+				func(replay.RunContext, *Empty) error {
+					return nil
+				})
+		})
+}
+
 func TestActivityErr(t *testing.T) {
 	dbc := test.ConnectDB(t)
 	ctx := context.Background()

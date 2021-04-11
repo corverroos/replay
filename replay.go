@@ -106,6 +106,10 @@ func RegisterActivity(getCtx func() context.Context, cl Client, cstore reflex.Cu
 // RegisterActivity starts a workflow consumer that consumes replay events and executes the workflow.
 // It maintains a goroutine for each run when started or when an activity response is received.
 func RegisterWorkflow(getCtx func() context.Context, cl Client, cstore reflex.CursorStore, workflowFunc interface{}, opts ...option) {
+	if err := validateWorkflow(workflowFunc); err != nil {
+		panic(err)
+	}
+
 	o := defaultOptions()
 	for _, opt := range opts {
 		opt(&o)
@@ -494,30 +498,18 @@ func validateActivity(activityFunc interface{}) error {
 		return errors.New("nil activity function")
 	}
 
-	check := func(num func() int, get func(int) reflect.Type, types ...reflect.Type) bool {
-		if num() != len(types) {
-			return false
-		}
-		for i, typ := range types {
-			if !get(i).Implements(typ) {
-				return false
-			}
-		}
-		return true
-	}
-
 	t := reflect.TypeOf(activityFunc)
 
 	if t.Kind() != reflect.Func {
 		return errors.New("non-function activity function")
 	}
 
-	if !check(t.NumIn, t.In, ctxType, anyType, fateType, protoType) {
+	if !checkParams(t.NumIn, t.In, ctxType, anyType, fateType, protoType) {
 		return errors.New("invalid activity function, input parameters not " +
 			"context.Context, interface{}, fate.Fate, proto.Message: " + t.String())
 	}
 
-	if !check(t.NumOut, t.Out, protoType, errorType) {
+	if !checkParams(t.NumOut, t.Out, protoType, errorType) {
 		return errors.New("invalid activity function, output parameters not " +
 			"proto.Message, error: " + t.String())
 	}
@@ -525,8 +517,45 @@ func validateActivity(activityFunc interface{}) error {
 	return nil
 }
 
+func validateWorkflow(workflowFunc interface{}) error {
+	if workflowFunc == nil {
+		return errors.New("nil workflow function")
+	}
+
+	t := reflect.TypeOf(workflowFunc)
+
+	if t.Kind() != reflect.Func {
+		return errors.New("non-function workflow function")
+	}
+
+	if !checkParams(t.NumIn, t.In, anyType, protoType) || t.In(0) != runCtxType {
+		return errors.New("invalid workflow function, input parameters not " +
+			"replay.RunContext, proto.Message: " + t.String())
+	}
+
+	if !checkParams(t.NumOut, t.Out) {
+		return errors.New("invalid workflow function, output parameters not empty: " +
+			t.String())
+	}
+
+	return nil
+}
+
+func checkParams(num func() int, get func(int) reflect.Type, types ...reflect.Type) bool {
+	if num() != len(types) {
+		return false
+	}
+	for i, typ := range types {
+		if !get(i).Implements(typ) {
+			return false
+		}
+	}
+	return true
+}
+
 var ctxType = reflect.TypeOf((*context.Context)(nil)).Elem()
 var fateType = reflect.TypeOf((*fate.Fate)(nil)).Elem()
 var protoType = reflect.TypeOf((*proto.Message)(nil)).Elem()
 var errorType = reflect.TypeOf((*error)(nil)).Elem()
 var anyType = reflect.TypeOf((*interface{})(nil)).Elem()
+var runCtxType = reflect.TypeOf(RunContext{})
