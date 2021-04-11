@@ -58,7 +58,7 @@ func Register(getCtx func() context.Context, cl replay.Client, cstore reflex.Cur
 			return nil
 		}
 
-		key, message, err := internal.ParseEvent(e)
+		message, err := internal.ParseMessage(e)
 		if err != nil {
 			return err
 		}

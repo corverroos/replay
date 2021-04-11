@@ -24,6 +24,7 @@ import (
 var ErrDuplicate = errors.New("duplicate entry", j.C("ERR_96713b1c52c5d59f"))
 var cancel = struct{}{}
 
+// Client defines the main replay server API.
 type Client interface {
 	internal.Client // Internal client methods only for use by this package.
 
@@ -31,11 +32,15 @@ type Client interface {
 	SignalRun(ctx context.Context, workflow, run string, s Signal, message proto.Message, extID string) error
 }
 
+// Signal defines a signal.
 type Signal interface {
+	// SignalType identifies different signal types of a workflow.
 	SignalType() int
+	// MessageType defines the data-type associated with this signal.
 	MessageType() proto.Message
 }
 
+// RegisterActivity starts a activity consumer that consumes replay events and executes the activity if requested.
 func RegisterActivity(getCtx func() context.Context, cl Client, cstore reflex.CursorStore, backends interface{}, activityFunc interface{}, opts ...option) {
 	o := defaultOptions()
 	for _, opt := range opts {
@@ -48,13 +53,18 @@ func RegisterActivity(getCtx func() context.Context, cl Client, cstore reflex.Cu
 			return nil
 		}
 
-		key, message, err := internal.ParseEvent(e)
+		key, err := internal.DecodeKey(e.ForeignID)
 		if err != nil {
 			return err
 		}
 
 		if key.Activity != activity {
 			return nil
+		}
+
+		message, err := internal.ParseMessage(e)
+		if err != nil {
+			return err
 		}
 
 		args := []reflect.Value{
@@ -74,6 +84,8 @@ func RegisterActivity(getCtx func() context.Context, cl Client, cstore reflex.Cu
 	go rpatterns.RunForever(getCtx, spec)
 }
 
+// RegisterActivity starts a workflow consumer that consumes replay events and executes the workflow.
+// It maintains a goroutine for each run when started or when an activity response is received.
 func RegisterWorkflow(getCtx func() context.Context, cl Client, cstore reflex.CursorStore, workflowFunc interface{}, opts ...option) {
 	o := defaultOptions()
 	for _, opt := range opts {
@@ -91,13 +103,18 @@ func RegisterWorkflow(getCtx func() context.Context, cl Client, cstore reflex.Cu
 	}
 	fn := func(ctx context.Context, f fate.Fate, e *reflex.Event) error {
 
-		key, message, err := internal.ParseEvent(e)
+		key, err := internal.DecodeKey(e.ForeignID)
 		if err != nil {
 			return err
 		}
 
 		if key.Workflow != workflow {
 			return nil
+		}
+
+		message, err := internal.ParseMessage(e)
+		if err != nil {
+			return err
 		}
 
 		switch e.Type.ReflexType() {
@@ -232,7 +249,12 @@ func (r *runner) bootstrapRun(ctx context.Context, run string, upTo int64) error
 	}
 
 	for i, e := range el {
-		key, message, err := internal.ParseEvent(&e)
+		key, err := internal.DecodeKey(e.ForeignID)
+		if err != nil {
+			return err
+		}
+
+		message, err := internal.ParseMessage(&e)
 		if err != nil {
 			return err
 		}

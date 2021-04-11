@@ -32,27 +32,27 @@ const (
 	ActivityResponse EventType = 5
 )
 
-func ParseEvent(e *reflex.Event) (Key, proto.Message, error) {
-	k, err := DecodeKey(e.ForeignID)
-	if err != nil {
-		return Key{}, nil, err
-	}
-
+// ParseMessage returns the typed proto message of the event.
+//
+// Note that this fails if the actual proto definition is not registered
+// in this binary. It should therefore only be called on
+// the client side and only for events related to the specific client.
+func ParseMessage(e *reflex.Event) (proto.Message, error) {
 	if len(e.MetaData) == 0 {
-		return k, nil, nil
+		return nil, nil
 	}
 
 	var a any.Any
 	if err := proto.Unmarshal(e.MetaData, &a); err != nil {
-		return Key{}, nil, errors.Wrap(err, "unmarshal proto")
+		return nil, errors.Wrap(err, "unmarshal proto")
 	}
 
 	var d ptypes.DynamicAny
 	if err := ptypes.UnmarshalAny(&a, &d); err != nil {
-		return Key{}, nil, errors.Wrap(err, "unmarshal anypb")
+		return nil, errors.Wrap(err, "unmarshal anypb")
 	}
 
-	return k, d.Message, nil
+	return d.Message, nil
 }
 
 type SignalSequence struct {
