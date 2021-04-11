@@ -36,8 +36,12 @@ type Signal interface {
 	MessageType() proto.Message
 }
 
-func RegisterActivity(getCtx func() context.Context, cl Client, cstore reflex.CursorStore, backends interface{}, activityFunc interface{}) {
-	activity := getFunctionName(activityFunc)
+func RegisterActivity(getCtx func() context.Context, cl Client, cstore reflex.CursorStore, backends interface{}, activityFunc interface{}, opts ...option) {
+	o := defaultOptions()
+	for _, opt := range opts {
+		opt(&o)
+	}
+	activity := o.nameFunc(activityFunc)
 
 	fn := func(ctx context.Context, f fate.Fate, e *reflex.Event) error {
 		if !reflex.IsType(e.Type, internal.ActivityRequest) {
@@ -70,8 +74,12 @@ func RegisterActivity(getCtx func() context.Context, cl Client, cstore reflex.Cu
 	go rpatterns.RunForever(getCtx, spec)
 }
 
-func RegisterWorkflow(getCtx func() context.Context, cl Client, cstore reflex.CursorStore, workflowFunc interface{}) {
-	workflow := getFunctionName(workflowFunc) // TODO(corver): Prefix service name.
+func RegisterWorkflow(getCtx func() context.Context, cl Client, cstore reflex.CursorStore, workflowFunc interface{}, opts ...option) {
+	o := defaultOptions()
+	for _, opt := range opts {
+		opt(&o)
+	}
+	workflow := o.nameFunc(workflowFunc) // TODO(corver): Prefix service name.
 
 	// TODO(corver): Validate workflowfunc signature.
 
@@ -116,7 +124,12 @@ type runState struct {
 	mu        sync.Mutex
 	indexes   map[string]int
 	responses map[internal.Key]chan response
-	ack       chan error
+
+	//  ackChan is used by the run goroutine to signal the main workflow consumer
+	// goroutine that it has progressed to the next checkpoint.
+	// It is either awaiting an activity response (nil) or it completed the run (nil)
+	// or it failed or was cancelled (non-nil error).
+	ackChan chan error
 }
 
 type response struct {
@@ -131,7 +144,7 @@ func (s *runState) RespondActivity(e *reflex.Event, key internal.Key, message pr
 	}
 	s.mu.Unlock()
 	s.responses[key] <- response{event: e, message: message}
-	return <-s.ack
+	return <-s.ackChan
 }
 
 func (s *runState) GetAndInc(activity string) int {
@@ -150,7 +163,7 @@ func (s *runState) AwaitActivity(ctx context.Context, key internal.Key) response
 		s.responses[key] = make(chan response)
 	}
 	s.mu.Unlock()
-	s.ack <- nil
+	s.ackChan <- nil
 
 	select {
 	case <-ctx.Done():
@@ -181,7 +194,7 @@ func (r *runner) StartRun(ctx context.Context, e *reflex.Event, key internal.Key
 	s := &runState{
 		responses: make(map[internal.Key]chan response),
 		indexes:   make(map[string]int),
-		ack:       make(chan error),
+		ackChan:   make(chan error),
 	}
 	r.runs[key.Run] = s
 
@@ -189,16 +202,16 @@ func (r *runner) StartRun(ctx context.Context, e *reflex.Event, key internal.Key
 		defer func() {
 			var err error
 			if r := recover(); r == abort {
-				err = errors.New("run aborted")
+				err = errors.New("run aborted", j.KV("panic", r))
 			} else if r != nil {
 				err = errors.New("run panic", j.KV("panic", r))
 			}
 
 			if err != nil {
 				log.Error(ctx, err, j.MKV{"key": key.Encode()})
-				// NoReturnErr: Return via ack chan.
+				// NoReturnErr: Return via ackChan chan.
 				select {
-				case s.ack <- err:
+				case s.ackChan <- err:
 				default:
 				}
 			}
@@ -210,11 +223,11 @@ func (r *runner) StartRun(ctx context.Context, e *reflex.Event, key internal.Key
 			return r.cl.CompleteRun(ctx, r.workflow, key.Run)
 		})
 
-		s.ack <- nil
+		s.ackChan <- nil
 		return
 	}()
 
-	return <-s.ack
+	return <-s.ackChan
 }
 
 func (r *runner) bootstrapRun(ctx context.Context, run string, upTo int64) error {

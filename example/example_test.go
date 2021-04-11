@@ -3,7 +3,6 @@ package example
 import (
 	"context"
 	"fmt"
-	"io"
 	"testing"
 	"time"
 
@@ -14,7 +13,6 @@ import (
 	"github.com/golang/protobuf/proto"
 	"github.com/luno/jettison/jtest"
 	"github.com/luno/jettison/log"
-	"github.com/stretchr/testify/require"
 )
 
 //go:generate protoc --go_out=plugins=grpc:. ./example.proto
@@ -38,43 +36,6 @@ func TestExample(t *testing.T) {
 	jtest.RequireNil(t, err)
 
 	<-completeChan
-}
-
-func TestExampleReplay(t *testing.T) {
-	dbc := test.ConnectDB(t)
-	cl := logical.New(dbc)
-	ctx := context.Background()
-	cstore := new(test.MemCursorStore)
-	errsChan := make(chan string)
-	tcl1 := &testClient{
-		Client:       cl,
-		activityErrs: map[string]error{"PrintGreeting": io.EOF},
-		completeChan: make(chan string),
-		errsChan:     errsChan,
-	}
-
-	var b Backends
-	replay.RegisterActivity(testCtx(t), cl, cstore, b, EnrichGreeting)
-	replay.RegisterActivity(testCtx(t), cl, cstore, b, PrintGreeting)
-	replay.RegisterWorkflow(testCtx(t), tcl1, cstore, GreetingWorkflow) // This workflow will block right before ctx.ExecActivity(PrintGreeting, name)
-
-	err := cl.RunWorkflow(context.Background(), "GreetingWorkflow", t.Name(), &String{Value: "World"})
-	jtest.RequireNil(t, err)
-
-	activity := <-errsChan
-	require.Equal(t, activity, "PrintGreeting")
-
-	completeChan := make(chan string)
-	tcl2 := &testClient{
-		Client:       cl,
-		completeChan: completeChan,
-	}
-	replay.RegisterWorkflow(testCtx(t), tcl2, cstore, GreetingWorkflow) // This workflow will bootstrap and continue after ctx.ExecActivity(PrintGreeting, name)
-	run := <-completeChan
-
-	el, err := cl.ListBootstrapEvents(ctx, "GreetingWorkflow", run)
-	jtest.RequireNil(t, err)
-	require.Len(t, el, 7)
 }
 
 func TestExampleSleep(t *testing.T) {
