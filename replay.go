@@ -510,12 +510,16 @@ func validateActivity(activityFunc interface{}) error {
 
 	if t.Kind() != reflect.Func {
 		return errors.New("non-function activity function")
-	} else if !check(t.NumIn, t.In, ctxType, anyType, fateType, protoType) {
-		return errors.New("activity function must have 4 input parameters: " +
-			"context.Context, interface{}, fate.Fate, proto.Message; " + t.String())
-	} else if !check(t.NumOut, t.Out, protoType, errorType) {
-		return errors.New("activity function must have 2 output parameters: " +
-			"proto.Message, error; " + t.String())
+	}
+
+	if !check(t.NumIn, t.In, ctxType, anyType, fateType, protoType) {
+		return errors.New("invalid activity function, input parameters not " +
+			"context.Context, interface{}, fate.Fate, proto.Message: " + t.String())
+	}
+
+	if !check(t.NumOut, t.Out, protoType, errorType) {
+		return errors.New("invalid activity function, output parameters not " +
+			"proto.Message, error: " + t.String())
 	}
 
 	return nil

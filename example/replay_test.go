@@ -40,7 +40,9 @@ func TestNoopWorkflow(t *testing.T) {
 
 func TestActivityFunc(t *testing.T) {
 	require.PanicsWithError(t,
-		"activity function must have 4 input parameters: context.Context, interface{}, fate.Fate, proto.Message; func(context.Context, fate.Fate, example.Backends, *example.Empty) (*example.Empty, error)",
+		"invalid activity function, input parameters not "+
+			"context.Context, interface{}, fate.Fate, proto.Message: "+
+			"func(context.Context, fate.Fate, example.Backends, *example.Empty) (*example.Empty, error)",
 		func() {
 			replay.RegisterActivity(nil, nil, nil, nil,
 				func(context.Context, fate.Fate, Backends, *Empty) (*Empty, error) {
