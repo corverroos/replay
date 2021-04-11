@@ -2,6 +2,7 @@ package example
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"testing"
 
@@ -11,6 +12,30 @@ import (
 	"github.com/luno/jettison/jtest"
 	"github.com/stretchr/testify/require"
 )
+
+func TestNoopWorkflow(t *testing.T) {
+	dbc := test.ConnectDB(t)
+	ctx := context.Background()
+	cl := logical.New(dbc)
+	cstore := new(test.MemCursorStore)
+
+	name := "noop"
+	noop := func(ctx replay.RunContext, _ *Empty) {}
+
+	completeChan := make(chan string)
+	tcl := &testClient{
+		Client:       cl,
+		completeChan: completeChan,
+	}
+	replay.RegisterWorkflow(testCtx(t), tcl, cstore, noop, replay.WithName(name))
+
+	for i := 0; i < 5; i++ {
+		run := fmt.Sprint(i)
+		err := cl.RunWorkflow(ctx, name, run, new(Empty))
+		jtest.RequireNil(t, err)
+		require.Equal(t, run, <-completeChan)
+	}
+}
 
 func TestIdenticalReplay(t *testing.T) {
 	dbc := test.ConnectDB(t)

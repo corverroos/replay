@@ -22,7 +22,7 @@ import (
 )
 
 var ErrDuplicate = errors.New("duplicate entry", j.C("ERR_96713b1c52c5d59f"))
-var abort = struct{}{}
+var cancel = struct{}{}
 
 type Client interface {
 	internal.Client // Internal client methods only for use by this package.
@@ -126,10 +126,8 @@ type runState struct {
 	responses map[internal.Key]chan response
 
 	//  ackChan is used by the run goroutine to signal the main workflow consumer
-	// goroutine that it has progressed to the next checkpoint.
-	// It is either awaiting an activity response (nil) or it completed the run (nil)
-	// or it failed or was cancelled (non-nil error).
-	ackChan chan error
+	// that it has progressed to the next checkpoint (await or complete) or not (panic or cancel).
+	ackChan chan ack
 }
 
 type response struct {
@@ -137,14 +135,20 @@ type response struct {
 	event   *reflex.Event
 }
 
-func (s *runState) RespondActivity(e *reflex.Event, key internal.Key, message proto.Message) error {
+type ack struct {
+	await    bool
+	complete bool
+	panic    bool
+	cancel   bool
+}
+
+func (s *runState) RespondActivity(e *reflex.Event, key internal.Key, message proto.Message) {
 	s.mu.Lock()
 	if _, ok := s.responses[key]; !ok {
 		s.responses[key] = make(chan response)
 	}
 	s.mu.Unlock()
 	s.responses[key] <- response{event: e, message: message}
-	return <-s.ackChan
 }
 
 func (s *runState) GetAndInc(activity string) int {
@@ -163,11 +167,11 @@ func (s *runState) AwaitActivity(ctx context.Context, key internal.Key) response
 		s.responses[key] = make(chan response)
 	}
 	s.mu.Unlock()
-	s.ackChan <- nil
+	s.ackChan <- ack{await: true}
 
 	select {
 	case <-ctx.Done():
-		panic(abort)
+		panic(cancel)
 	case r := <-s.responses[key]:
 		return r
 	}
@@ -194,26 +198,20 @@ func (r *runner) StartRun(ctx context.Context, e *reflex.Event, key internal.Key
 	s := &runState{
 		responses: make(map[internal.Key]chan response),
 		indexes:   make(map[string]int),
-		ackChan:   make(chan error),
+		ackChan:   make(chan ack),
 	}
 	r.runs[key.Run] = s
 
 	go func() {
 		defer func() {
-			var err error
-			if r := recover(); r == abort {
-				err = errors.New("run aborted", j.KV("panic", r))
+			if r := recover(); r == cancel {
+				log.Error(ctx, errors.New("run cancelled"), j.MKV{"key": key.Encode()})
+				s.ackChan <- ack{cancel: true}
 			} else if r != nil {
-				err = errors.New("run panic", j.KV("panic", r))
-			}
-
-			if err != nil {
-				log.Error(ctx, err, j.MKV{"key": key.Encode()})
-				// NoReturnErr: Return via ackChan chan.
-				select {
-				case s.ackChan <- err:
-				default:
-				}
+				log.Error(ctx, errors.New("run panic"), j.MKV{"key": key.Encode(), "panic": r})
+				s.ackChan <- ack{panic: true}
+			} else {
+				s.ackChan <- ack{complete: true}
 			}
 		}()
 
@@ -222,12 +220,9 @@ func (r *runner) StartRun(ctx context.Context, e *reflex.Event, key internal.Key
 		ensure(ctx, func() error {
 			return r.cl.CompleteRun(ctx, r.workflow, key.Run)
 		})
-
-		s.ackChan <- nil
-		return
 	}()
 
-	return <-s.ackChan
+	return r.processAck(ctx, s.ackChan, key.Run)
 }
 
 func (r *runner) bootstrapRun(ctx context.Context, run string, upTo int64) error {
@@ -277,10 +272,12 @@ func (r *runner) RespondActivity(ctx context.Context, e *reflex.Event, key inter
 		return r.bootstrapRun(ctx, key.Run, e.IDInt())
 	}
 
-	err := r.runs[key.Run].RespondActivity(e, key, message)
-
+	s := r.runs[key.Run]
 	r.Unlock()
-	return err
+
+	s.RespondActivity(e, key, message)
+
+	return r.processAck(ctx, s.ackChan, key.Run)
 }
 
 func (r *runner) run(ctx context.Context, e *reflex.Event, run string, args proto.Message, state *runState) {
@@ -298,6 +295,31 @@ func (r *runner) run(ctx context.Context, e *reflex.Event, run string, args prot
 	}
 
 	reflect.ValueOf(r.workflowFunc).Call(workflowArgs)
+}
+
+// processAck waits for an ack from the run goroutine and does cleanup if the run completed.
+func (r *runner) processAck(ctx context.Context, ackChan chan ack, run string) error {
+	var a ack
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case a = <-ackChan:
+	}
+
+	if a.await {
+		return nil
+	} else if a.complete {
+		delete(r.runs, run)
+		return nil
+	} else if a.cancel {
+		delete(r.runs, run)
+		return errors.New("run cancelled")
+	} else if a.panic {
+		delete(r.runs, run)
+		return errors.New("run panic")
+	} else {
+		return errors.New("bug: invalid ack")
+	}
 }
 
 type RunContext struct {
@@ -408,7 +430,7 @@ func ensure(ctx context.Context, fn func() error) {
 	for {
 		err := fn()
 		if ctx.Err() != nil {
-			panic(abort)
+			panic(cancel)
 		} else if err != nil {
 			// NoReturnErr: Log and try again.
 			log.Error(ctx, errors.Wrap(err, "ensure"))
