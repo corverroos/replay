@@ -15,8 +15,8 @@ import (
 	"github.com/luno/reflex/reflexpb"
 )
 
-const SleepActivity = "replay_sleep"
-const SignalActivity = "replay_signal"
+const ActivitySleep = "replay_sleep"
+const ActivitySignal = "replay_signal"
 
 type EventType int
 
@@ -25,9 +25,9 @@ func (e EventType) ReflexType() int {
 }
 
 const (
-	CreateRun        EventType = 1
-	CompleteRun      EventType = 2
-	FailRun          EventType = 3
+	CreateRun   EventType = 1
+	CompleteRun EventType = 2
+	//  FailRun      EventType = 3
 	ActivityRequest  EventType = 4
 	ActivityResponse EventType = 5
 )
@@ -170,11 +170,23 @@ func Marshal(message proto.Message) ([]byte, error) {
 	return proto.Marshal(message)
 }
 
+// Client defines the replay server's internal API. It may only be used by the replay package itself.
 type Client interface {
+	// RequestActivity inserts a ActivityRequest event.
 	RequestActivity(ctx context.Context, key string, message proto.Message) error
-	CompleteActivity(ctx context.Context, key string, message proto.Message) error
-	CompleteActivityRaw(ctx context.Context, key string, message *any.Any) error
+
+	// RespondActivity inserts a ActivityResponse event.
+	RespondActivity(ctx context.Context, key string, message proto.Message) error
+
+	// RespondActivityRaw inserts a ActivityResponse event without wrapping the message in an any.
+	RespondActivityRaw(ctx context.Context, key string, message *any.Any) error
+
+	// CompleteRun inserts a RunComplete event.
 	CompleteRun(ctx context.Context, workflow, run string) error
+
+	// ListBootstrapEvents returns the RunCreated and ActivityResponse events for the run.
 	ListBootstrapEvents(ctx context.Context, workflow, run string) ([]reflex.Event, error)
+
+	// Stream streams the replay events.
 	Stream(ctx context.Context, after string, opts ...reflex.StreamOption) (reflex.StreamClient, error)
 }

@@ -37,7 +37,7 @@ func Register(getCtx func() context.Context, cl replay.Client, cstore reflex.Cur
 			return err
 		}
 
-		if key.Activity != internal.SleepActivity {
+		if key.Activity != internal.ActivitySleep {
 			return nil
 		}
 
@@ -60,7 +60,7 @@ func Register(getCtx func() context.Context, cl replay.Client, cstore reflex.Cur
 		return nil
 	}
 
-	spec := reflex.NewSpec(cl.Stream, cstore, reflex.NewConsumer(internal.SleepActivity, fn))
+	spec := reflex.NewSpec(cl.Stream, cstore, reflex.NewConsumer(internal.ActivitySleep, fn))
 	go rpatterns.RunForever(getCtx, spec)
 	go completeSleepsForever(getCtx, cl, dbc)
 }
@@ -88,7 +88,7 @@ func completeSleepsOnce(ctx context.Context, cl replay.Client, dbc *sql.DB) erro
 			return nil
 		}
 
-		err := cl.CompleteActivity(ctx, s.Key, &replaypb.SleepDone{})
+		err := cl.RespondActivity(ctx, s.Key, &replaypb.SleepDone{})
 		if err != nil {
 			return err
 		}

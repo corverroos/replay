@@ -59,28 +59,28 @@ func (c *Client) RequestActivity(ctx context.Context, key string, message proto.
 		return err
 	}
 
-	_, err = c.clpb.RequestActivity(ctx, &pb.ActivityRequest{
+	_, err = c.clpb.RequestActivity(ctx, &pb.ActivityMessage{
 		Key:     key,
 		Message: anyMsg,
 	})
 	return err
 }
 
-func (c *Client) CompleteActivityRaw(ctx context.Context, key string, message *any.Any) error {
-	_, err := c.clpb.CompleteActivity(ctx, &pb.ActivityRequest{
+func (c *Client) RespondActivityRaw(ctx context.Context, key string, message *any.Any) error {
+	_, err := c.clpb.RespondActivity(ctx, &pb.ActivityMessage{
 		Key:     key,
 		Message: message,
 	})
 	return err
 }
 
-func (c *Client) CompleteActivity(ctx context.Context, key string, message proto.Message) error {
+func (c *Client) RespondActivity(ctx context.Context, key string, message proto.Message) error {
 	anyMsg, err := internal.ToAny(message)
 	if err != nil {
 		return err
 	}
 
-	return c.CompleteActivityRaw(ctx, key, anyMsg)
+	return c.RespondActivityRaw(ctx, key, anyMsg)
 }
 
 func (c *Client) CompleteRun(ctx context.Context, workflow, run string) error {

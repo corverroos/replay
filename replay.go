@@ -1,3 +1,4 @@
+// Package replay provides a workflow framework that is robust with respect to temporary errors.
 package replay
 
 import (
@@ -28,7 +29,18 @@ var cancel = struct{}{}
 type Client interface {
 	internal.Client // Internal client methods only for use by this package.
 
+	// RunWorkflow inserts a CreateRun event which results in an invocation
+	// of the workflow with the message.
+	//
+	// The run identifier must be unique otherwise ErrDuplicate is returned
+	// since the run was already created.
 	RunWorkflow(ctx context.Context, workflow, run string, message proto.Message) error
+
+	// SignalRun inserts signal which results in the signal being available
+	// to the run if it subsequently calls ctx.AwaitSignal.
+	//
+	// External ID must be unique otherwise ErrDuplicate is returned since
+	// the signal was already created.
 	SignalRun(ctx context.Context, workflow, run string, s Signal, message proto.Message, extID string) error
 }
 
@@ -70,6 +82,7 @@ func RegisterActivity(getCtx func() context.Context, cl Client, cstore reflex.Cu
 		args := []reflect.Value{
 			reflect.ValueOf(ctx),
 			reflect.ValueOf(backends),
+			reflect.ValueOf(fate.New()),
 			reflect.ValueOf(message),
 		}
 
@@ -77,7 +90,7 @@ func RegisterActivity(getCtx func() context.Context, cl Client, cstore reflex.Cu
 
 		resp := respVals[0].Interface().(proto.Message)
 		// TODO(corver): Handle activity errors.
-		return cl.CompleteActivity(ctx, e.ForeignID, resp)
+		return cl.RespondActivity(ctx, e.ForeignID, resp)
 	}
 
 	spec := reflex.NewSpec(cl.Stream, cstore, reflex.NewConsumer(activity, fn))
@@ -125,8 +138,6 @@ func RegisterWorkflow(getCtx func() context.Context, cl Client, cstore reflex.Cu
 		case internal.ActivityRequest.ReflexType():
 			return nil
 		case internal.CompleteRun.ReflexType():
-			return nil
-		case internal.FailRun.ReflexType():
 			return nil
 		default:
 			return errors.New("unknown type")
@@ -375,7 +386,7 @@ func (c *RunContext) ExecActivity(activityFunc interface{}, args proto.Message) 
 }
 
 func (c *RunContext) AwaitSignal(s Signal, duration time.Duration) (proto.Message, bool) {
-	activity := internal.SignalActivity
+	activity := internal.ActivitySignal
 	seq := internal.SignalSequence{
 		SignalType: s.SignalType(),
 		Index:      c.state.GetAndInc(fmt.Sprintf("%s:%d", activity, s.SignalType())),
@@ -402,7 +413,7 @@ func (c *RunContext) AwaitSignal(s Signal, duration time.Duration) (proto.Messag
 }
 
 func (c *RunContext) Sleep(duration time.Duration) {
-	activity := internal.SleepActivity
+	activity := internal.ActivitySleep
 	index := c.state.GetAndInc(activity)
 	key := internal.Key{
 		Workflow: c.workflow,

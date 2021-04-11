@@ -9,8 +9,8 @@ import "google/protobuf/duration.proto";
 service Replay {
   rpc RunWorkflow(RunRequest) returns (Empty) {}
   rpc SignalRun(SignalRequest) returns (Empty) {}
-  rpc RequestActivity(ActivityRequest) returns (Empty) {}
-  rpc CompleteActivity(ActivityRequest) returns (Empty) {}
+  rpc RequestActivity(ActivityMessage) returns (Empty) {}
+  rpc RespondActivity(ActivityMessage) returns (Empty) {}
   rpc CompleteRun(CompleteRequest) returns (Empty) {}
   rpc ListBootstrapEvents(ListBootstrapRequest) returns (Events) {}
   rpc Stream(reflexpb.StreamRequest) returns (stream reflexpb.Event) {}
@@ -42,7 +42,7 @@ message SignalRequest {
   string external_id = 5;
 }
 
-message ActivityRequest {
+message ActivityMessage {
   string key = 2;
   google.protobuf.Any message = 3;
 }

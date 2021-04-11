@@ -51,16 +51,16 @@ func (c *Client) RequestActivity(ctx context.Context, key string, message proto.
 	return swallowErrDup(db.Insert(ctx, c.dbc, key, internal.ActivityRequest, b))
 }
 
-func (c *Client) CompleteActivity(ctx context.Context, key string, message proto.Message) error {
+func (c *Client) RespondActivity(ctx context.Context, key string, message proto.Message) error {
 	apb, err := internal.ToAny(message)
 	if err != nil {
 		return err
 	}
 
-	return c.CompleteActivityRaw(ctx, key, apb)
+	return c.RespondActivityRaw(ctx, key, apb)
 }
 
-func (c *Client) CompleteActivityRaw(ctx context.Context, key string, message *any.Any) error {
+func (c *Client) RespondActivityRaw(ctx context.Context, key string, message *any.Any) error {
 	b, err := internal.Marshal(message)
 	if err != nil {
 		return err

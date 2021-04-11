@@ -54,7 +54,7 @@ func Register(getCtx func() context.Context, cl replay.Client, cstore reflex.Cur
 			return err
 		}
 
-		if key.Activity != internal.SignalActivity {
+		if key.Activity != internal.ActivitySignal {
 			return nil
 		}
 
@@ -77,7 +77,7 @@ func Register(getCtx func() context.Context, cl replay.Client, cstore reflex.Cur
 		return nil
 	}
 
-	spec := reflex.NewSpec(cl.Stream, cstore, reflex.NewConsumer(internal.SignalActivity, fn))
+	spec := reflex.NewSpec(cl.Stream, cstore, reflex.NewConsumer(internal.ActivitySignal, fn))
 	go rpatterns.RunForever(getCtx, spec)
 	go completeChecksForever(getCtx, cl, dbc)
 }
@@ -140,7 +140,7 @@ func completeChecksOnce(ctx context.Context, cl replay.Client, dbc *sql.DB) erro
 			}
 		}
 
-		err = cl.CompleteActivityRaw(ctx, c.Key, &a)
+		err = cl.RespondActivityRaw(ctx, c.Key, &a)
 		if err != nil {
 			return err
 		}
@@ -156,7 +156,7 @@ func completeChecksOnce(ctx context.Context, cl replay.Client, dbc *sql.DB) erro
 			return nil
 		}
 
-		err := cl.CompleteActivity(ctx, c.Key, &replaypb.SleepDone{})
+		err := cl.RespondActivity(ctx, c.Key, &replaypb.SleepDone{})
 		if err != nil {
 			return err
 		}

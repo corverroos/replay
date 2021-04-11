@@ -37,7 +37,7 @@ func (s *Server) SignalRun(ctx context.Context, req *pb.SignalRequest) (*pb.Empt
 	return new(pb.Empty), signal.Insert(ctx, s.dbc, req.Workflow, req.Run, int(req.SignalType), req.Message, req.ExternalId)
 }
 
-func (s *Server) RequestActivity(ctx context.Context, req *pb.ActivityRequest) (*pb.Empty, error) {
+func (s *Server) RequestActivity(ctx context.Context, req *pb.ActivityMessage) (*pb.Empty, error) {
 	b, err := internal.Marshal(req.Message)
 	if err != nil {
 		return nil, err
@@ -46,7 +46,7 @@ func (s *Server) RequestActivity(ctx context.Context, req *pb.ActivityRequest) (
 	return swallowErrDup(db.Insert(ctx, s.dbc, req.Key, internal.ActivityRequest, b))
 }
 
-func (s *Server) CompleteActivity(ctx context.Context, req *pb.ActivityRequest) (*pb.Empty, error) {
+func (s *Server) RespondActivity(ctx context.Context, req *pb.ActivityMessage) (*pb.Empty, error) {
 	b, err := internal.Marshal(req.Message)
 	if err != nil {
 		return nil, err
@@ -93,10 +93,12 @@ func (s *Server) Stop() {
 	s.rserver.Stop()
 }
 
+// Register registers the replay server with the grpc server.
 func Register(s *grpc.Server, srv pb.ReplayServer) {
 	pb.RegisterReplayServer(s, srv)
 }
 
+// StartLoops starts serverside background loops.
 func StartLoops(getCtx func() context.Context, cl replay.Client, cstore reflex.CursorStore, dbc *sql.DB) {
 	sleep.Register(getCtx, cl, cstore, dbc)
 	signal.Register(getCtx, cl, cstore, dbc)

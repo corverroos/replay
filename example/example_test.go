@@ -11,6 +11,7 @@ import (
 	"github.com/corverroos/replay/internal"
 	"github.com/corverroos/replay/test"
 	"github.com/golang/protobuf/proto"
+	"github.com/luno/fate"
 	"github.com/luno/jettison/jtest"
 	"github.com/luno/jettison/log"
 )
@@ -137,11 +138,11 @@ func SignalWorkflow(ctx replay.RunContext, _ *Empty) {
 	ctx.ExecActivity(PrintGreeting, &String{Value: fmt.Sprintf("sum %d", sum)})
 }
 
-func EnrichGreeting(ctx context.Context, b Backends, msg *String) (*String, error) {
+func EnrichGreeting(ctx context.Context, b Backends, f fate.Fate, msg *String) (*String, error) {
 	return &String{Value: "[" + msg.Value + "]"}, nil
 }
 
-func MaybeSignal(ctx context.Context, b Backends, i *Int) (*Empty, error) {
+func MaybeSignal(ctx context.Context, b Backends, f fate.Fate, i *Int) (*Empty, error) {
 	if i.Value > 3 {
 		return &Empty{}, nil
 	}
@@ -151,7 +152,7 @@ func MaybeSignal(ctx context.Context, b Backends, i *Int) (*Empty, error) {
 	return &Empty{}, err
 }
 
-func PrintGreeting(ctx context.Context, b Backends, msg *String) (*Empty, error) {
+func PrintGreeting(ctx context.Context, b Backends, f fate.Fate, msg *String) (*Empty, error) {
 	log.Info(ctx, "Hello "+msg.Value)
 	return &Empty{}, nil
 }
