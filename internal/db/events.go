@@ -34,7 +34,8 @@ func CleanCache(t *testing.T) {
 
 func ListBootstrapEvents(ctx context.Context, dbc *sql.DB, workflow, run string) ([]reflex.Event, error) {
 	rows, err := dbc.QueryContext(ctx, "select id, `key`, type, timestamp, metadata "+
-		"from replay_events where workflow=? and run=? and (type=? or type=?) order by id asc", workflow, run, internal.CreateRun, internal.ActivityResponse)
+		"from replay_events where workflow=? and run=? and (type=? or type=? or type=?) order by id asc",
+		workflow, run, internal.CreateRun, internal.ActivityResponse, internal.CompleteRun)
 	if err != nil {
 		return nil, err
 	}

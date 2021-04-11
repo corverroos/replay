@@ -297,9 +297,23 @@ func (r *runner) bootstrapRun(ctx context.Context, run string, upTo int64) error
 			break
 		}
 
-		err = r.RespondActivity(ctx, &e, key, message)
-		if err != nil {
-			return err
+		switch e.Type.ReflexType() {
+		case internal.ActivityResponse.ReflexType():
+			err = r.RespondActivity(ctx, &e, key, message)
+			if err != nil {
+				return err
+			}
+
+		case internal.CompleteRun.ReflexType():
+			// Complete event in bootstrap list means logic changed
+			// and run completed with outstanding activity.
+			// Ignore events after complete by breaking bootstrap now.
+
+			// TODO(corver): If run goroutine not complete (logic changed again), should we cancel it?
+			return nil
+
+		default:
+			return errors.New("bug: unexpected type")
 		}
 	}
 
