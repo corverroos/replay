@@ -13,9 +13,7 @@ import (
 	"google.golang.org/grpc"
 )
 
-var _ replay.Client = (*Client)(nil)
-
-func New(cc *grpc.ClientConn) *Client {
+func New(cc *grpc.ClientConn) replay.Client {
 	return &Client{clpb: pb.NewReplayClient(cc)}
 }
 
@@ -23,27 +21,29 @@ type Client struct {
 	clpb pb.ReplayClient
 }
 
-func (c *Client) RunWorkflow(ctx context.Context, workflow, run string, message proto.Message) error {
+func (c *Client) RunWorkflow(ctx context.Context, namespace, workflow, run string, message proto.Message) error {
 	anyMsg, err := internal.ToAny(message)
 	if err != nil {
 		return err
 	}
 
 	_, err = c.clpb.RunWorkflow(ctx, &pb.RunRequest{
-		Workflow: workflow,
-		Run:      run,
-		Message:  anyMsg,
+		Namespace: namespace,
+		Workflow:  workflow,
+		Run:       run,
+		Message:   anyMsg,
 	})
 	return err
 }
 
-func (c *Client) SignalRun(ctx context.Context, workflow, run string, s replay.Signal, message proto.Message, extID string) error {
+func (c *Client) SignalRun(ctx context.Context, namespace, workflow, run string, s replay.Signal, message proto.Message, extID string) error {
 	anyMsg, err := internal.ToAny(message)
 	if err != nil {
 		return err
 	}
 
 	_, err = c.clpb.SignalRun(ctx, &pb.SignalRequest{
+		Namespace:  namespace,
 		Workflow:   workflow,
 		Run:        run,
 		Message:    anyMsg,
@@ -83,18 +83,20 @@ func (c *Client) RespondActivity(ctx context.Context, key string, message proto.
 	return c.RespondActivityRaw(ctx, key, anyMsg)
 }
 
-func (c *Client) CompleteRun(ctx context.Context, workflow, run string) error {
+func (c *Client) CompleteRun(ctx context.Context, namespace, workflow, run string) error {
 	_, err := c.clpb.CompleteRun(ctx, &pb.CompleteRequest{
-		Workflow: workflow,
-		Run:      run,
+		Namespace: namespace,
+		Workflow:  workflow,
+		Run:       run,
 	})
 	return err
 }
 
-func (c *Client) ListBootstrapEvents(ctx context.Context, workflow, run string) ([]reflex.Event, error) {
+func (c *Client) ListBootstrapEvents(ctx context.Context, namespace, workflow, run string) ([]reflex.Event, error) {
 	rl, err := c.clpb.ListBootstrapEvents(ctx, &pb.ListBootstrapRequest{
-		Workflow: workflow,
-		Run:      run,
+		Namespace: namespace,
+		Workflow:  workflow,
+		Run:       run,
 	})
 	if err != nil {
 		return nil, err
@@ -113,12 +115,16 @@ func (c *Client) ListBootstrapEvents(ctx context.Context, workflow, run string) 
 	return res, nil
 }
 
-func (c *Client) Stream(ctx context.Context, after string,
-	opts ...reflex.StreamOption) (reflex.StreamClient, error) {
+func (c *Client) Stream(namespace string) reflex.StreamFunc {
 
-	sFn := reflex.WrapStreamPB(func(ctx context.Context, req *reflexpb.StreamRequest) (reflex.StreamClientPB, error) {
-		return c.clpb.Stream(ctx, req)
+	return reflex.WrapStreamPB(func(ctx context.Context, req *reflexpb.StreamRequest) (reflex.StreamClientPB, error) {
+		return c.clpb.Stream(ctx, &pb.StreamRequest{
+			Namespace: namespace,
+			Req:       req,
+		})
 	})
+}
 
-	return sFn(ctx, after, opts...)
+func (c *Client) Internal() internal.Client {
+	return c
 }

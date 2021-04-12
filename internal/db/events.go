@@ -15,14 +15,53 @@ import (
 var events = rsql.NewEventsTable("replay_events",
 	rsql.WithEventTimeField("timestamp"),
 	rsql.WithEventsInMemNotifier(),
-	rsql.WithEventMetadataField("metadata"),
+	rsql.WithEventMetadataField("message"),
 	rsql.WithEventForeignIDField("`key`"),
 	rsql.WithEventsInserter(inserter),
 )
 
-// ToStream returns a reflex stream for the events.
-func ToStream(dbc *sql.DB) reflex.StreamFunc {
-	return events.ToStream(dbc)
+// ToStream returns a reflex stream filtering only events for the namespace unless a wildcard is provided.
+func ToStream(dbc *sql.DB, namespace string) reflex.StreamFunc {
+	if namespace == "*" {
+		return events.ToStream(dbc)
+	}
+
+	return func(ctx context.Context, after string, opts ...reflex.StreamOption) (reflex.StreamClient, error) {
+		cl, err := events.ToStream(dbc)(ctx, after, opts...)
+		if err != nil {
+			return nil, err
+		}
+
+		return &filter{
+			namespace: namespace,
+			cl:        cl,
+		}, nil
+	}
+}
+
+type filter struct {
+	namespace string
+	cl        reflex.StreamClient
+}
+
+func (f *filter) Recv() (*reflex.Event, error) {
+	for {
+		e, err := f.cl.Recv()
+		if err != nil {
+			return nil, err
+		}
+
+		key, err := internal.DecodeKey(e.ForeignID)
+		if err != nil {
+			return nil, err
+		}
+
+		if key.Namespace != f.namespace {
+			continue
+		}
+
+		return e, nil
+	}
 }
 
 // CleanCache clears the cache after testing to clear test artifacts.
@@ -32,10 +71,10 @@ func CleanCache(t *testing.T) {
 	})
 }
 
-func ListBootstrapEvents(ctx context.Context, dbc *sql.DB, workflow, run string) ([]reflex.Event, error) {
-	rows, err := dbc.QueryContext(ctx, "select id, `key`, type, timestamp, metadata "+
-		"from replay_events where workflow=? and run=? and (type=? or type=? or type=?) order by id asc",
-		workflow, run, internal.CreateRun, internal.ActivityResponse, internal.CompleteRun)
+func ListBootstrapEvents(ctx context.Context, dbc *sql.DB, namespace, workflow, run string) ([]reflex.Event, error) {
+	rows, err := dbc.QueryContext(ctx, "select id, `key`, type, timestamp, message "+
+		"from replay_events where namespace=? and workflow=? and run=? and (type=? or type=? or type=?) order by id asc",
+		namespace, workflow, run, internal.CreateRun, internal.ActivityResponse, internal.CompleteRun)
 	if err != nil {
 		return nil, err
 	}
@@ -90,7 +129,7 @@ func Insert(ctx context.Context, dbc *sql.DB, key string, typ internal.EventType
 }
 
 func inserter(ctx context.Context, tx *sql.Tx,
-	key string, typ reflex.EventType, metadata []byte) error {
+	key string, typ reflex.EventType, message []byte) error {
 
 	k, err := internal.DecodeKey(key)
 	if err != nil {
@@ -107,7 +146,7 @@ func inserter(ctx context.Context, tx *sql.Tx,
 		run.Valid = true
 	}
 
-	_, err = tx.ExecContext(ctx, "insert into replay_events set `key`=?, workflow=?, run=?, "+
-		"timestamp=now(3), type=?, metadata=?", key, k.Workflow, run, typ, metadata)
+	_, err = tx.ExecContext(ctx, "insert into replay_events set `key`=?, namespace=?, workflow=?, run=?, "+
+		"timestamp=now(3), type=?, message=?", key, k.Namespace, k.Workflow, run, typ, message)
 	return err
 }

@@ -84,28 +84,31 @@ func DecodeSignalSequence(sequence string) (SignalSequence, error) {
 }
 
 type Key struct {
-	Workflow string
-	Run      string
-	Activity string
-	Sequence string
+	Namespace string
+	Workflow  string
+	Run       string
+	Activity  string
+	Sequence  string
 }
 
 func (k Key) Encode() string {
-	return path.Join(k.Workflow, k.Run, k.Activity, k.Sequence)
+	return path.Join(k.Namespace, k.Workflow, k.Run, k.Activity, k.Sequence)
 }
 
 func DecodeKey(key string) (Key, error) {
 	split := strings.Split(key, "/")
-	if len(split) < 2 {
+	if len(split) < 3 {
 		return Key{}, errors.New("invalid key")
 	}
 	var k Key
 	for i, s := range split {
 		if i == 0 {
-			k.Workflow = s
+			k.Namespace = s
 		} else if i == 1 {
-			k.Run = s
+			k.Workflow = s
 		} else if i == 2 {
+			k.Run = s
+		} else if i == 3 {
 			k.Activity = s
 		} else {
 			k.Sequence = s
@@ -144,8 +147,12 @@ func EventFromProto(e *reflexpb.Event) (*reflex.Event, error) {
 	}, nil
 }
 
-func ShortKey(workflow, run string) string {
-	return Key{Workflow: workflow, Run: run}.Encode()
+func ShortKey(namespace, workflow, run string) string {
+	return Key{
+		Namespace: namespace,
+		Workflow:  workflow,
+		Run:       run,
+	}.Encode()
 }
 
 type eventType int
@@ -182,11 +189,8 @@ type Client interface {
 	RespondActivityRaw(ctx context.Context, key string, message *any.Any) error
 
 	// CompleteRun inserts a RunComplete event.
-	CompleteRun(ctx context.Context, workflow, run string) error
+	CompleteRun(ctx context.Context, namespace, workflow, run string) error
 
-	// ListBootstrapEvents returns the RunCreated and ActivityResponse events for the run.
-	ListBootstrapEvents(ctx context.Context, workflow, run string) ([]reflex.Event, error)
-
-	// Stream streams the replay events.
-	Stream(ctx context.Context, after string, opts ...reflex.StreamOption) (reflex.StreamClient, error)
+	// ListBootstrapEvents returns the boostrap events for the run.
+	ListBootstrapEvents(ctx context.Context, namespace, workflow, run string) ([]reflex.Event, error)
 }

@@ -3,6 +3,8 @@ package signal
 import (
 	"context"
 	"database/sql"
+	"encoding/binary"
+	"hash/fnv"
 	"time"
 
 	"github.com/corverroos/replay"
@@ -20,19 +22,19 @@ import (
 
 //go:generate protoc --go_out=plugins=grpc:. ./sleep.proto
 
-type check struct {
-	ID     int64
-	Key    string
-	FailAt time.Time
-	Status CheckStatus
+type await struct {
+	ID        int64
+	Key       string
+	TimeoutAt time.Time
+	Status    AwaitStatus
 }
 
-type CheckStatus int
+type AwaitStatus int
 
 const (
-	CheckPending   CheckStatus = 1
-	CheckFailed    CheckStatus = 2
-	CheckCompleted CheckStatus = 3
+	AwaitPending AwaitStatus = 1
+	AwaitTimeout AwaitStatus = 2
+	AwaitSuccess AwaitStatus = 3
 )
 
 func RegisterForTesting(ctx context.Context, cl replay.Client, cstore reflex.CursorStore, dbc *sql.DB) {
@@ -66,8 +68,8 @@ func Register(getCtx func() context.Context, cl replay.Client, cstore reflex.Cur
 		req := message.(*replaypb.SleepRequest)
 		completeAt := time.Now().Add(time.Duration(req.Duration.Seconds) * time.Second)
 
-		_, err = dbc.ExecContext(ctx, "insert into replay_signal_checks set `key`=?, "+
-			"created_at=?, fail_at=?, status=?", e.ForeignID, time.Now(), completeAt, CheckPending)
+		_, err = dbc.ExecContext(ctx, "insert into replay_signal_awaits set `key`=?, "+
+			"created_at=?, timeout_at=?, status=?", e.ForeignID, time.Now(), completeAt, AwaitPending)
 		if _, ok := db.MaybeWrapErrDuplicate(err, "by_key"); ok {
 			// Record already exists. Continue.
 		} else if err != nil {
@@ -77,19 +79,28 @@ func Register(getCtx func() context.Context, cl replay.Client, cstore reflex.Cur
 		return nil
 	}
 
-	spec := reflex.NewSpec(cl.Stream, cstore, reflex.NewConsumer(internal.ActivitySignal, fn))
+	spec := reflex.NewSpec(cl.Stream("*"), cstore, reflex.NewConsumer(internal.ActivitySignal, fn))
 	go rpatterns.RunForever(getCtx, spec)
-	go completeChecksForever(getCtx, cl, dbc)
+	go completeAwaitsForever(getCtx, cl.Internal(), dbc)
 }
 
-func Insert(ctx context.Context, dbc *sql.DB, workflow, run string, signalType int, message *any.Any, externalID string) error {
+func Insert(ctx context.Context, dbc *sql.DB, namespace, workflow, run string, signalType int, message *any.Any, externalID string) error {
 	b, err := proto.Marshal(message)
 	if err != nil {
 		return err
 	}
 
-	_, err = dbc.ExecContext(ctx, "insert into replay_signals set workflow=?, run=?, type=?, external_id=?, created_at=?, message=? ",
-		workflow, run, signalType, externalID, time.Now(), b)
+	// Mysql doesn't support uniq indexes with this many columns, so create a hash column.
+	h := fnv.New128a()
+	_, _ = h.Write([]byte(namespace))
+	_, _ = h.Write([]byte(workflow))
+	_, _ = h.Write([]byte(run))
+	_ = binary.Write(h, binary.BigEndian, signalType)
+	_, _ = h.Write([]byte(externalID))
+	hash := h.Sum(nil)
+
+	_, err = dbc.ExecContext(ctx, "insert into replay_signals set namespace=?, workflow=?, run=?, type=?, external_id=?, created_at=?, message=?, hash=?",
+		namespace, workflow, run, signalType, externalID, time.Now(), b, hash)
 	if err, ok := db.MaybeWrapErrDuplicate(err, "uniq"); ok {
 		return err
 	} else if err != nil {
@@ -99,11 +110,11 @@ func Insert(ctx context.Context, dbc *sql.DB, workflow, run string, signalType i
 	return nil
 }
 
-func completeChecksForever(getCtx func() context.Context, cl replay.Client, dbc *sql.DB) {
+func completeAwaitsForever(getCtx func() context.Context, cl internal.Client, dbc *sql.DB) {
 	for {
 		ctx := getCtx()
 
-		err := completeChecksOnce(ctx, cl, dbc)
+		err := completeAwaitsOnce(ctx, cl, dbc)
 		if err != nil {
 			log.Error(ctx, errors.Wrap(err, "complete sleeps once"))
 		}
@@ -111,48 +122,48 @@ func completeChecksForever(getCtx func() context.Context, cl replay.Client, dbc 
 	}
 }
 
-func completeChecksOnce(ctx context.Context, cl replay.Client, dbc *sql.DB) error {
+func completeAwaitsOnce(ctx context.Context, cl internal.Client, dbc *sql.DB) error {
 	// TODO(corver): Do two queries, one to fail, one to complete.
-	checks, err := listPending(ctx, dbc)
+	awaits, err := listPending(ctx, dbc)
 	if err != nil {
 		return errors.Wrap(err, "list to complete")
 	}
 
-	var other []check
-	for _, c := range checks {
-		key, err := internal.DecodeKey(c.Key)
+	var other []await
+	for _, a := range awaits {
+		key, err := internal.DecodeKey(a.Key)
 		if err != nil {
 			return err
 		}
 
 		id, message, err := lookupSignal(ctx, dbc, key)
 		if errors.Is(err, sql.ErrNoRows) {
-			other = append(other, c)
+			other = append(other, a)
 			continue
 		} else if err != nil {
 			return err
 		}
 
-		var a any.Any
+		var any any.Any
 		if len(message) > 0 {
-			if err := proto.Unmarshal(message, &a); err != nil {
+			if err := proto.Unmarshal(message, &any); err != nil {
 				return errors.Wrap(err, "unmarshal proto")
 			}
 		}
 
-		err = cl.RespondActivityRaw(ctx, c.Key, &a)
+		err = cl.RespondActivityRaw(ctx, a.Key, &any)
 		if err != nil {
 			return err
 		}
 
-		err = completeSignal(ctx, dbc, id, c.ID)
+		err = completeSignal(ctx, dbc, id, a.ID)
 		if err != nil {
 			return err
 		}
 	}
 
 	for _, c := range other {
-		if !shouldComplete(c.FailAt) {
+		if !shouldComplete(c.TimeoutAt) {
 			return nil
 		}
 
@@ -161,7 +172,7 @@ func completeChecksOnce(ctx context.Context, cl replay.Client, dbc *sql.DB) erro
 			return err
 		}
 
-		err = failCheck(ctx, dbc, c.ID)
+		err = timeoutAwait(ctx, dbc, c.ID)
 		if err != nil {
 			return err
 		}
@@ -182,13 +193,13 @@ func lookupSignal(ctx context.Context, dbc *sql.DB, key internal.Key) (id int64,
 	}
 
 	err = dbc.QueryRowContext(ctx, "select id, message "+
-		"from replay_signals where workflow=? and run=? and type=? and check_id is null",
-		key.Workflow, key.Run, seq.SignalType).Scan(&id, &message)
+		"from replay_signals where namespace=? and workflow=? and run=? and type=? and check_id is null",
+		key.Namespace, key.Workflow, key.Run, seq.SignalType).Scan(&id, &message)
 	return id, message, err
 }
 
-func failCheck(ctx context.Context, dbc *sql.DB, checkID int64) error {
-	res, err := dbc.ExecContext(ctx, "update replay_signal_checks set status=? where id=? and status=?", CheckFailed, checkID, CheckPending)
+func timeoutAwait(ctx context.Context, dbc *sql.DB, checkID int64) error {
+	res, err := dbc.ExecContext(ctx, "update replay_signal_awaits set status=? where id=? and status=?", AwaitTimeout, checkID, AwaitPending)
 	if err != nil {
 		return err
 	}
@@ -208,7 +219,7 @@ func completeSignal(ctx context.Context, dbc *sql.DB, signalID, checkID int64) e
 	}
 	defer tx.Rollback()
 
-	res, err := tx.ExecContext(ctx, "update replay_signal_checks set status=? where id=? and status=?", CheckCompleted, checkID, CheckPending)
+	res, err := tx.ExecContext(ctx, "update replay_signal_awaits set status=? where id=? and status=?", AwaitSuccess, checkID, AwaitPending)
 	if err != nil {
 		return err
 	}
@@ -233,19 +244,19 @@ func completeSignal(ctx context.Context, dbc *sql.DB, signalID, checkID int64) e
 	return tx.Commit()
 }
 
-func listPending(ctx context.Context, dbc *sql.DB) ([]check, error) {
-	rows, err := dbc.QueryContext(ctx, "select id, `key`, status, fail_at "+
-		"from replay_signal_checks where status=? order by fail_at asc", CheckPending)
+func listPending(ctx context.Context, dbc *sql.DB) ([]await, error) {
+	rows, err := dbc.QueryContext(ctx, "select id, `key`, status, timeout_at "+
+		"from replay_signal_awaits where status=? order by timeout_at asc", AwaitPending)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	var res []check
+	var res []await
 	for rows.Next() {
-		var c check
+		var c await
 
-		err := rows.Scan(&c.ID, &c.Key, &c.Status, &c.FailAt)
+		err := rows.Scan(&c.ID, &c.Key, &c.Status, &c.TimeoutAt)
 		if err != nil {
 			return nil, err
 		}

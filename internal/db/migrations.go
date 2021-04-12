@@ -3,21 +3,22 @@ package db
 var migrations = []string{`
 CREATE TABLE replay_events (
   id BIGINT NOT NULL AUTO_INCREMENT,
-  ` + "`key`" + ` VARCHAR(255) NOT NULL,
-  workflow VARCHAR(255) NOT NULL DEFAULT "",
+  ` + "`key`" + ` VARCHAR(512) NOT NULL,
+  namespace VARCHAR(255) NOT NULL, 
+  workflow VARCHAR(255) NOT NULL,
   run VARCHAR(255),
   type INT NOT NULL,
   timestamp DATETIME(3) NOT NULL,
-  metadata MEDIUMBLOB,
+  message MEDIUMBLOB,
 
   PRIMARY KEY (id),
   UNIQUE by_type_key (type, ` + "`key`" + `),
-  INDEX (type, workflow, run)
+  INDEX (type, namespace, workflow, run)
 );
 `, `
 CREATE TABLE replay_sleeps (
   id BIGINT NOT NULL AUTO_INCREMENT,
-  ` + "`key`" + ` VARCHAR(255) NOT NULL,
+  ` + "`key`" + ` VARCHAR(512) NOT NULL,
   created_at DATETIME(3) NOT NULL,
   complete_at DATETIME(3) NOT NULL,
   completed BOOL NOT NULL,
@@ -27,11 +28,11 @@ CREATE TABLE replay_sleeps (
   INDEX (completed, complete_at)
 );
 `, `
-CREATE TABLE replay_signal_checks (
+CREATE TABLE replay_signal_awaits (
   id BIGINT NOT NULL AUTO_INCREMENT,
-  ` + "`key`" + ` VARCHAR(255) NOT NULL,
+  ` + "`key`" + ` VARCHAR(512) NOT NULL,
   created_at DATETIME(3) NOT NULL,
-  fail_at DATETIME(3) NOT NULL,
+  timeout_at DATETIME(3) NOT NULL,
   status TINYINT NOT NULL,
 
   PRIMARY KEY (id),
@@ -41,6 +42,8 @@ CREATE TABLE replay_signal_checks (
 `, `
 CREATE TABLE replay_signals (
   id BIGINT NOT NULL AUTO_INCREMENT,
+  namespace VARCHAR(255) NOT NULL,
+  hash BINARY(128) NOT NULL,
   workflow VARCHAR(255) NOT NULL,
   run VARCHAR(255) NOT NULL,
   type TINYINT NOT NULL,
@@ -50,7 +53,7 @@ CREATE TABLE replay_signals (
   check_id BIGINT,
 
   PRIMARY KEY (id),
-  UNIQUE uniq (workflow, run, type, external_id)
+  UNIQUE uniq (namespace, hash)
 );
 `,
 }

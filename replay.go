@@ -27,21 +27,25 @@ var cancel = struct{}{}
 
 // Client defines the main replay server API.
 type Client interface {
-	internal.Client // Internal client methods only for use by this package.
-
 	// RunWorkflow inserts a CreateRun event which results in an invocation
 	// of the workflow with the message.
 	//
 	// The run identifier must be unique otherwise ErrDuplicate is returned
 	// since the run was already created.
-	RunWorkflow(ctx context.Context, workflow, run string, message proto.Message) error
+	RunWorkflow(ctx context.Context, namespace, workflow, run string, message proto.Message) error
 
 	// SignalRun inserts signal which results in the signal being available
 	// to the run if it subsequently calls ctx.AwaitSignal.
 	//
-	// External ID must be unique otherwise ErrDuplicate is returned since
+	// External ID must be unique per namespace and workflow otherwise ErrDuplicate is returned since
 	// the signal was already created.
-	SignalRun(ctx context.Context, workflow, run string, s Signal, message proto.Message, extID string) error
+	SignalRun(ctx context.Context, namespace, workflow, run string, s Signal, message proto.Message, extID string) error
+
+	// Stream returns a replay events stream function for the namespace.
+	Stream(namespace string) reflex.StreamFunc
+
+	// Internal returns the internal replay server API. This should only be used by the replay package itself.
+	Internal() internal.Client
 }
 
 // Signal defines a signal.
@@ -53,7 +57,7 @@ type Signal interface {
 }
 
 // RegisterActivity starts a activity consumer that consumes replay events and executes the activity if requested.
-func RegisterActivity(getCtx func() context.Context, cl Client, cstore reflex.CursorStore, backends interface{}, activityFunc interface{}, opts ...option) {
+func RegisterActivity(getCtx func() context.Context, cl Client, cstore reflex.CursorStore, backends interface{}, namespace string, activityFunc interface{}, opts ...option) {
 	if err := validateActivity(activityFunc); err != nil {
 		panic(err)
 	}
@@ -96,16 +100,16 @@ func RegisterActivity(getCtx func() context.Context, cl Client, cstore reflex.Cu
 			return respVals[1].Interface().(error)
 		}
 
-		return cl.RespondActivity(ctx, e.ForeignID, respVals[0].Interface().(proto.Message))
+		return cl.Internal().RespondActivity(ctx, e.ForeignID, respVals[0].Interface().(proto.Message))
 	}
 
-	spec := reflex.NewSpec(cl.Stream, cstore, reflex.NewConsumer(activity, fn))
+	spec := reflex.NewSpec(cl.Stream(namespace), cstore, reflex.NewConsumer(activity, fn))
 	go rpatterns.RunForever(getCtx, spec)
 }
 
-// RegisterActivity starts a workflow consumer that consumes replay events and executes the workflow.
+// RegisterWorkflow starts a workflow consumer that consumes replay events and executes the workflow.
 // It maintains a goroutine for each run when started or when an activity response is received.
-func RegisterWorkflow(getCtx func() context.Context, cl Client, cstore reflex.CursorStore, workflowFunc interface{}, opts ...option) {
+func RegisterWorkflow(getCtx func() context.Context, cl Client, cstore reflex.CursorStore, namespace string, workflowFunc interface{}, opts ...option) {
 	if err := validateWorkflow(workflowFunc); err != nil {
 		panic(err)
 	}
@@ -114,12 +118,13 @@ func RegisterWorkflow(getCtx func() context.Context, cl Client, cstore reflex.Cu
 	for _, opt := range opts {
 		opt(&o)
 	}
-	workflow := o.nameFunc(workflowFunc) // TODO(corver): Prefix service name.
+	workflow := o.nameFunc(workflowFunc)
 	metrics := o.workflowMetrics(workflow)
 
 	r := runner{
-		cl:           cl,
+		cl:           cl.Internal(),
 		metrics:      metrics,
+		namespace:    namespace,
 		workflow:     workflow,
 		workflowFunc: workflowFunc,
 		runs:         make(map[string]*runState),
@@ -163,7 +168,7 @@ func RegisterWorkflow(getCtx func() context.Context, cl Client, cstore reflex.Cu
 		}
 	}
 
-	spec := reflex.NewSpec(cl.Stream, cstore, reflex.NewConsumer(workflow, fn))
+	spec := reflex.NewSpec(cl.Stream(namespace), cstore, reflex.NewConsumer(workflow, fn))
 	go rpatterns.RunForever(getCtx, spec)
 }
 
@@ -236,7 +241,8 @@ func (s *runState) AwaitActivity(ctx context.Context, key internal.Key) response
 type runner struct {
 	sync.Mutex
 
-	cl           Client
+	cl           internal.Client
+	namespace    string
 	workflow     string
 	workflowFunc interface{}
 	metrics      Metrics
@@ -278,7 +284,7 @@ func (r *runner) StartRun(ctx context.Context, e *reflex.Event, key internal.Key
 		r.run(ctx, e, key.Run, message, s)
 
 		ensure(ctx, func() error {
-			return r.cl.CompleteRun(ctx, r.workflow, key.Run)
+			return r.cl.CompleteRun(ctx, r.namespace, r.workflow, key.Run)
 		})
 
 		r.metrics.IncComplete(time.Since(e.Timestamp))
@@ -290,7 +296,7 @@ func (r *runner) StartRun(ctx context.Context, e *reflex.Event, key internal.Key
 // bootstrapRun bootstraps a previously started run by replaying all previous events. It returns
 // true if the run is still active after bootstrapping.
 func (r *runner) bootstrapRun(ctx context.Context, run string, upTo int64) (bool, error) {
-	el, err := r.cl.ListBootstrapEvents(ctx, r.workflow, run)
+	el, err := r.cl.ListBootstrapEvents(ctx, r.namespace, r.workflow, run)
 	if err != nil {
 		return false, errors.Wrap(err, "list responses")
 	}
@@ -387,6 +393,7 @@ func (r *runner) run(ctx context.Context, e *reflex.Event, run string, message p
 	args := []reflect.Value{
 		reflect.ValueOf(RunContext{
 			Context:     ctx,
+			namespace:   r.namespace,
 			workflow:    r.workflow,
 			run:         run,
 			state:       state,
@@ -428,10 +435,11 @@ func (r *runner) processAck(ctx context.Context, ackChan chan ack, run string) (
 
 type RunContext struct {
 	context.Context
-	workflow string
-	run      string
-	state    *runState
-	cl       Client
+	namespace string
+	workflow  string
+	run       string
+	state     *runState
+	cl        internal.Client
 
 	createEvent *reflex.Event
 	lastEvent   *reflex.Event
@@ -450,10 +458,11 @@ func (c *RunContext) ExecActivity(activityFunc interface{}, message proto.Messag
 
 	index := c.state.GetAndInc(activity)
 	key := internal.Key{
-		Workflow: c.workflow,
-		Run:      c.run,
-		Activity: activity,
-		Sequence: fmt.Sprint(index),
+		Namespace: c.namespace,
+		Workflow:  c.workflow,
+		Run:       c.run,
+		Activity:  activity,
+		Sequence:  fmt.Sprint(index),
 	}
 
 	ensure(c, func() error {
@@ -473,10 +482,11 @@ func (c *RunContext) AwaitSignal(s Signal, duration time.Duration) (proto.Messag
 	}
 
 	key := internal.Key{
-		Workflow: c.workflow,
-		Run:      c.run,
-		Activity: activity,
-		Sequence: seq.Encode(),
+		Namespace: c.namespace,
+		Workflow:  c.workflow,
+		Run:       c.run,
+		Activity:  activity,
+		Sequence:  seq.Encode(),
 	}
 	ensure(c, func() error {
 		return c.cl.RequestActivity(c, key.Encode(), &replaypb.SleepRequest{
@@ -496,10 +506,11 @@ func (c *RunContext) Sleep(duration time.Duration) {
 	activity := internal.ActivitySleep
 	index := c.state.GetAndInc(activity)
 	key := internal.Key{
-		Workflow: c.workflow,
-		Run:      c.run,
-		Activity: activity,
-		Sequence: fmt.Sprint(index),
+		Namespace: c.namespace,
+		Workflow:  c.workflow,
+		Run:       c.run,
+		Activity:  activity,
+		Sequence:  fmt.Sprint(index),
 	}
 
 	ensure(c, func() error {

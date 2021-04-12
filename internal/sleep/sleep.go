@@ -60,12 +60,12 @@ func Register(getCtx func() context.Context, cl replay.Client, cstore reflex.Cur
 		return nil
 	}
 
-	spec := reflex.NewSpec(cl.Stream, cstore, reflex.NewConsumer(internal.ActivitySleep, fn))
+	spec := reflex.NewSpec(cl.Stream("*"), cstore, reflex.NewConsumer(internal.ActivitySleep, fn))
 	go rpatterns.RunForever(getCtx, spec)
-	go completeSleepsForever(getCtx, cl, dbc)
+	go completeSleepsForever(getCtx, cl.Internal(), dbc)
 }
 
-func completeSleepsForever(getCtx func() context.Context, cl replay.Client, dbc *sql.DB) {
+func completeSleepsForever(getCtx func() context.Context, cl internal.Client, dbc *sql.DB) {
 	for {
 		ctx := getCtx()
 
@@ -77,7 +77,7 @@ func completeSleepsForever(getCtx func() context.Context, cl replay.Client, dbc 
 	}
 }
 
-func completeSleepsOnce(ctx context.Context, cl replay.Client, dbc *sql.DB) error {
+func completeSleepsOnce(ctx context.Context, cl internal.Client, dbc *sql.DB) error {
 	sl, err := listToComplete(ctx, dbc)
 	if err != nil {
 		return errors.Wrap(err, "list to complete")

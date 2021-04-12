@@ -14,6 +14,7 @@ import (
 	"github.com/luno/fate"
 	"github.com/luno/jettison/jtest"
 	"github.com/luno/jettison/log"
+	"github.com/luno/reflex"
 )
 
 //go:generate protoc --go_out=plugins=grpc:. ./example.proto
@@ -24,16 +25,17 @@ func TestExample(t *testing.T) {
 	cstore := new(test.MemCursorStore)
 	completeChan := make(chan string)
 	tcl := &testClient{
-		Client:       cl,
+		cl:           cl,
+		Client:       cl.Internal(),
 		completeChan: completeChan,
 	}
 	var b Backends
 
-	replay.RegisterActivity(testCtx(t), cl, cstore, b, EnrichGreeting)
-	replay.RegisterActivity(testCtx(t), cl, cstore, b, PrintGreeting)
-	replay.RegisterWorkflow(testCtx(t), tcl, cstore, GreetingWorkflow)
+	replay.RegisterActivity(testCtx(t), cl, cstore, b, "ns", EnrichGreeting)
+	replay.RegisterActivity(testCtx(t), cl, cstore, b, "ns", PrintGreeting)
+	replay.RegisterWorkflow(testCtx(t), tcl, cstore, "ns", GreetingWorkflow)
 
-	err := cl.RunWorkflow(context.Background(), "GreetingWorkflow", t.Name(), &String{Value: "World"})
+	err := cl.RunWorkflow(context.Background(), "ns", "GreetingWorkflow", t.Name(), &String{Value: "World"})
 	jtest.RequireNil(t, err)
 
 	<-completeChan
@@ -46,16 +48,17 @@ func TestExampleSleep(t *testing.T) {
 	cstore := new(test.MemCursorStore)
 	completeChan := make(chan string)
 	tcl := &testClient{
-		Client:       cl,
+		cl:           cl,
+		Client:       cl.Internal(),
 		completeChan: completeChan,
 	}
 
 	b := Backends{Replay: cl}
 	test.RegisterNoopSleeps(ctx, cl, cstore, dbc)
-	replay.RegisterActivity(testCtx(t), cl, cstore, b, PrintGreeting)
-	replay.RegisterWorkflow(testCtx(t), tcl, cstore, SleepWorkflow)
+	replay.RegisterActivity(testCtx(t), cl, cstore, b, "ns", PrintGreeting)
+	replay.RegisterWorkflow(testCtx(t), tcl, cstore, "ns", SleepWorkflow)
 
-	err := cl.RunWorkflow(ctx, "SleepWorkflow", t.Name(), new(Empty))
+	err := cl.RunWorkflow(ctx, "ns", "SleepWorkflow", t.Name(), new(Empty))
 	jtest.RequireNil(t, err)
 
 	<-completeChan
@@ -68,18 +71,19 @@ func TestExampleSignal(t *testing.T) {
 	cstore := new(test.MemCursorStore)
 	completeChan := make(chan string)
 	tcl := &testClient{
-		Client:       cl,
+		cl:           cl,
+		Client:       cl.Internal(),
 		completeChan: completeChan,
 	}
 
 	b := Backends{Replay: cl}
 
 	test.RegisterNoSleepSignals(ctx, cl, cstore, dbc)
-	replay.RegisterActivity(testCtx(t), cl, cstore, b, MaybeSignal)
-	replay.RegisterActivity(testCtx(t), cl, cstore, b, PrintGreeting)
-	replay.RegisterWorkflow(testCtx(t), tcl, cstore, SignalWorkflow)
+	replay.RegisterActivity(testCtx(t), cl, cstore, b, "ns", MaybeSignal)
+	replay.RegisterActivity(testCtx(t), cl, cstore, b, "ns", PrintGreeting)
+	replay.RegisterWorkflow(testCtx(t), tcl, cstore, "ns", SignalWorkflow)
 
-	err := cl.RunWorkflow(ctx, "SignalWorkflow", "test", new(Empty))
+	err := cl.RunWorkflow(ctx, "ns", "SignalWorkflow", "test", new(Empty))
 	jtest.RequireNil(t, err)
 
 	<-completeChan
@@ -90,16 +94,17 @@ func TestExampleGRPC(t *testing.T) {
 	cstore := new(test.MemCursorStore)
 	completeChan := make(chan string)
 	tcl := &testClient{
-		Client:       cl,
+		cl:           cl,
+		Client:       cl.Internal(),
 		completeChan: completeChan,
 	}
 	var b Backends
 
-	replay.RegisterActivity(testCtx(t), cl, cstore, b, EnrichGreeting)
-	replay.RegisterActivity(testCtx(t), cl, cstore, b, PrintGreeting)
-	replay.RegisterWorkflow(testCtx(t), tcl, cstore, GreetingWorkflow)
+	replay.RegisterActivity(testCtx(t), cl, cstore, b, "ns", EnrichGreeting)
+	replay.RegisterActivity(testCtx(t), cl, cstore, b, "ns", PrintGreeting)
+	replay.RegisterWorkflow(testCtx(t), tcl, cstore, "ns", GreetingWorkflow)
 
-	err := cl.RunWorkflow(context.Background(), "GreetingWorkflow", t.Name(), &String{Value: "World"})
+	err := cl.RunWorkflow(context.Background(), "ns", "GreetingWorkflow", t.Name(), &String{Value: "World"})
 	jtest.RequireNil(t, err)
 
 	<-completeChan
@@ -148,7 +153,7 @@ func MaybeSignal(ctx context.Context, b Backends, f fate.Fate, i *Int) (*Empty, 
 	}
 	i.Value += 100
 
-	err := b.Replay.SignalRun(ctx, "SignalWorkflow", "test", testsig{}, i, fmt.Sprint(i.Value))
+	err := b.Replay.SignalRun(ctx, "ns", "SignalWorkflow", "ns", testsig{}, i, fmt.Sprint(i.Value))
 	return &Empty{}, err
 }
 
@@ -168,16 +173,33 @@ func (s testsig) MessageType() proto.Message {
 }
 
 type testClient struct {
-	replay.Client
+	internal.Client
+	cl           replay.Client
 	completeChan chan string
 	errsChan     chan string
 	activityErrs map[string]error
 }
 
-func (c *testClient) CompleteRun(ctx context.Context, workflow, run string) error {
+func (c *testClient) RunWorkflow(ctx context.Context, namespace, workflow, run string, message proto.Message) error {
+	return c.cl.RunWorkflow(ctx, namespace, workflow, run, message)
+}
+
+func (c *testClient) SignalRun(ctx context.Context, namespace, workflow, run string, s replay.Signal, message proto.Message, extID string) error {
+	return c.cl.SignalRun(ctx, namespace, workflow, run, s, message, extID)
+}
+
+func (c *testClient) Stream(namespace string) reflex.StreamFunc {
+	return c.cl.Stream(namespace)
+}
+
+func (c *testClient) Internal() internal.Client {
+	return c
+}
+
+func (c *testClient) CompleteRun(ctx context.Context, namespace, workflow, run string) error {
 	defer func() { c.completeChan <- run }()
 
-	return c.Client.CompleteRun(ctx, workflow, run)
+	return c.Client.CompleteRun(ctx, namespace, workflow, run)
 }
 
 func (c *testClient) RequestActivity(ctx context.Context, key string, args proto.Message) error {

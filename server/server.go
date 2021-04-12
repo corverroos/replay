@@ -12,7 +12,6 @@ import (
 	"github.com/corverroos/replay/internal/sleep"
 	"github.com/luno/jettison/errors"
 	"github.com/luno/reflex"
-	"github.com/luno/reflex/reflexpb"
 	"google.golang.org/grpc"
 )
 
@@ -30,11 +29,11 @@ func (s *Server) RunWorkflow(ctx context.Context, req *pb.RunRequest) (*pb.Empty
 		return nil, err
 	}
 
-	return new(pb.Empty), db.Insert(ctx, s.dbc, internal.ShortKey(req.Workflow, req.Run), internal.CreateRun, b)
+	return new(pb.Empty), db.Insert(ctx, s.dbc, internal.ShortKey(req.Namespace, req.Workflow, req.Run), internal.CreateRun, b)
 }
 
 func (s *Server) SignalRun(ctx context.Context, req *pb.SignalRequest) (*pb.Empty, error) {
-	return new(pb.Empty), signal.Insert(ctx, s.dbc, req.Workflow, req.Run, int(req.SignalType), req.Message, req.ExternalId)
+	return new(pb.Empty), signal.Insert(ctx, s.dbc, req.Namespace, req.Workflow, req.Run, int(req.SignalType), req.Message, req.ExternalId)
 }
 
 func (s *Server) RequestActivity(ctx context.Context, req *pb.ActivityMessage) (*pb.Empty, error) {
@@ -56,11 +55,11 @@ func (s *Server) RespondActivity(ctx context.Context, req *pb.ActivityMessage) (
 }
 
 func (s *Server) CompleteRun(ctx context.Context, req *pb.CompleteRequest) (*pb.Empty, error) {
-	return swallowErrDup(db.Insert(ctx, s.dbc, internal.ShortKey(req.Workflow, req.Run), internal.CompleteRun, nil))
+	return swallowErrDup(db.Insert(ctx, s.dbc, internal.ShortKey(req.Namespace, req.Workflow, req.Run), internal.CompleteRun, nil))
 }
 
 func (s *Server) ListBootstrapEvents(ctx context.Context, req *pb.ListBootstrapRequest) (*pb.Events, error) {
-	el, err := db.ListBootstrapEvents(ctx, s.dbc, req.Workflow, req.Run)
+	el, err := db.ListBootstrapEvents(ctx, s.dbc, req.Namespace, req.Workflow, req.Run)
 	if err != nil {
 		return nil, err
 	}
@@ -78,8 +77,8 @@ func (s *Server) ListBootstrapEvents(ctx context.Context, req *pb.ListBootstrapR
 	return &resp, nil
 }
 
-func (s *Server) Stream(req *reflexpb.StreamRequest, srv pb.Replay_StreamServer) error {
-	return s.rserver.Stream(db.ToStream(s.dbc), req, srv)
+func (s *Server) Stream(req *pb.StreamRequest, srv pb.Replay_StreamServer) error {
+	return s.rserver.Stream(db.ToStream(s.dbc, req.Namespace), req.Req, srv)
 }
 
 func New(dbc *sql.DB) *Server {

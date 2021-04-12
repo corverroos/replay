@@ -13,7 +13,7 @@ service Replay {
   rpc RespondActivity(ActivityMessage) returns (Empty) {}
   rpc CompleteRun(CompleteRequest) returns (Empty) {}
   rpc ListBootstrapEvents(ListBootstrapRequest) returns (Events) {}
-  rpc Stream(reflexpb.StreamRequest) returns (stream reflexpb.Event) {}
+  rpc Stream(StreamRequest) returns (stream reflexpb.Event) {}
 }
 
 message Empty {}
@@ -29,30 +29,39 @@ message Events {
 }
 
 message RunRequest {
-  string workflow = 1;
-  string run = 2;
-  google.protobuf.Any message = 3;
+  string namespace = 1;
+  string workflow = 2;
+  string run = 3;
+  google.protobuf.Any message = 4;
 }
 
 message SignalRequest {
-  string workflow = 1;
-  string run = 2;
-  int32 signal_type = 3;
-  google.protobuf.Any message = 4;
-  string external_id = 5;
+  string namespace = 1;
+  string workflow = 2;
+  string run = 3;
+  int32 signal_type = 4;
+  google.protobuf.Any message = 5;
+  string external_id = 6;
 }
 
 message ActivityMessage {
-  string key = 2;
-  google.protobuf.Any message = 3;
+  string key = 1;
+  google.protobuf.Any message = 2;
 }
 
 message CompleteRequest {
-  string workflow = 1;
-  string run = 2;
+  string namespace = 1;
+  string workflow = 2;
+  string run = 3;
 }
 
 message ListBootstrapRequest {
-  string workflow = 1;
-  string run = 2;
+  string namespace = 1;
+  string workflow = 2;
+  string run = 3;
+}
+
+message StreamRequest {
+  string namespace = 1;
+  reflexpb.StreamRequest req = 2;
 }
