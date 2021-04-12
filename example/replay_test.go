@@ -288,6 +288,61 @@ func TestBootstrapComplete(t *testing.T) {
 	require.True(t, reflex.IsType(el[6].Type, internal.CompleteRun))
 }
 
+func TestOutOfOrderResponses(t *testing.T) {
+	dbc := test.ConnectDB(t)
+	cl := logical.New(dbc)
+	ctx := context.Background()
+	cstore := new(test.MemCursorStore)
+	errsChan := make(chan string)
+	tcl1 := &testClient{
+		Client:       cl,
+		activityErrs: map[string]error{"PrintGreeting": io.EOF},
+		completeChan: make(chan string),
+		errsChan:     errsChan,
+	}
+
+	name := "test_workflow"
+
+	var b Backends
+	replay.RegisterActivity(testCtx(t), cl, cstore, b, EnrichGreeting)
+	replay.RegisterActivity(testCtx(t), cl, cstore, b, PrintGreeting)
+
+	// This workflow will block right before ctx.ExecActivity(PrintGreeting, name)
+	replay.RegisterWorkflow(testCtx(t), tcl1, cstore, makeWorkflow(5), replay.WithName(name))
+
+	err := cl.RunWorkflow(context.Background(), name, t.Name(), &String{Value: "World"})
+	jtest.RequireNil(t, err)
+
+	activity := <-errsChan
+	require.Equal(t, activity, "PrintGreeting")
+
+	completeChan := make(chan string)
+	tcl2 := &testClient{
+		Client:       cl,
+		completeChan: completeChan,
+	}
+
+	// This workflow will error during bootstrap since the activity order changed
+	errChan := make(chan struct{})
+	replay.RegisterWorkflow(testCtx(t), tcl2, cstore, makeWorkflow(1), replay.WithName(name),
+		replay.WithWorkflowMetrics(func(workflow string) replay.Metrics {
+			return replay.Metrics{
+				IncErrors: func() {
+					errChan <- struct{}{}
+				},
+				IncStart:    func() {},
+				IncComplete: func(time.Duration) {},
+			}
+		}))
+	<-errChan
+
+	el, err := cl.ListBootstrapEvents(ctx, name, t.Name())
+	jtest.RequireNil(t, err)
+	require.Len(t, el, 6)
+	require.True(t, reflex.IsType(el[0].Type, internal.CreateRun))
+	require.True(t, reflex.IsType(el[5].Type, internal.ActivityResponse))
+}
+
 func makeWorkflow(n int) func(ctx replay.RunContext, name *String) {
 	return func(ctx replay.RunContext, name *String) {
 		for i := 0; i < n; i++ {

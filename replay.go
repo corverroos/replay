@@ -115,16 +115,22 @@ func RegisterWorkflow(getCtx func() context.Context, cl Client, cstore reflex.Cu
 		opt(&o)
 	}
 	workflow := o.nameFunc(workflowFunc) // TODO(corver): Prefix service name.
-
-	// TODO(corver): Validate workflowfunc signature.
+	metrics := o.workflowMetrics(workflow)
 
 	r := runner{
 		cl:           cl,
+		metrics:      metrics,
 		workflow:     workflow,
 		workflowFunc: workflowFunc,
 		runs:         make(map[string]*runState),
 	}
-	fn := func(ctx context.Context, f fate.Fate, e *reflex.Event) error {
+	fn := func(ctx context.Context, f fate.Fate, e *reflex.Event) (err error) {
+		defer func() {
+			if err != nil {
+				// NoReturnErr: Just incrementing metrics here.
+				metrics.IncErrors()
+			}
+		}()
 
 		key, err := internal.DecodeKey(e.ForeignID)
 		if err != nil {
@@ -142,6 +148,7 @@ func RegisterWorkflow(getCtx func() context.Context, cl Client, cstore reflex.Cu
 
 		switch e.Type.ReflexType() {
 		case internal.CreateRun.ReflexType():
+			metrics.IncStart()
 			_, err := r.StartRun(ctx, e, key, message)
 			return err
 		case internal.ActivityResponse.ReflexType():
@@ -152,7 +159,7 @@ func RegisterWorkflow(getCtx func() context.Context, cl Client, cstore reflex.Cu
 		case internal.CompleteRun.ReflexType():
 			return nil
 		default:
-			return errors.New("unknown type")
+			return errors.New("bug: unknown type")
 		}
 	}
 
@@ -182,13 +189,20 @@ type ack struct {
 	cancel   bool
 }
 
-func (s *runState) RespondActivity(e *reflex.Event, key internal.Key, message proto.Message) {
+func (s *runState) RespondActivity(e *reflex.Event, key internal.Key, message proto.Message) error {
 	s.mu.Lock()
-	if _, ok := s.responses[key]; !ok {
-		s.responses[key] = make(chan response)
+	ch, ok := s.responses[key]
+	if !ok {
+		return errors.New("workflow logic changed, run goroutine not awaiting response", j.KS("key", key.Encode()))
 	}
 	s.mu.Unlock()
-	s.responses[key] <- response{event: e, message: message}
+
+	select {
+	case ch <- response{event: e, message: message}:
+		return nil
+	default:
+		return errors.New("run goroutine not awaiting response, maybe it was cancelled")
+	}
 }
 
 func (s *runState) GetAndInc(activity string) int {
@@ -203,8 +217,10 @@ func (s *runState) GetAndInc(activity string) int {
 
 func (s *runState) AwaitActivity(ctx context.Context, key internal.Key) response {
 	s.mu.Lock()
-	if _, ok := s.responses[key]; !ok {
-		s.responses[key] = make(chan response)
+	ch, ok := s.responses[key]
+	if !ok {
+		ch = make(chan response)
+		s.responses[key] = ch
 	}
 	s.mu.Unlock()
 	s.ackChan <- ack{await: true}
@@ -212,7 +228,7 @@ func (s *runState) AwaitActivity(ctx context.Context, key internal.Key) response
 	select {
 	case <-ctx.Done():
 		panic(cancel)
-	case r := <-s.responses[key]:
+	case r := <-ch:
 		return r
 	}
 }
@@ -223,6 +239,7 @@ type runner struct {
 	cl           Client
 	workflow     string
 	workflowFunc interface{}
+	metrics      Metrics
 
 	runs map[string]*runState
 }
@@ -263,6 +280,8 @@ func (r *runner) StartRun(ctx context.Context, e *reflex.Event, key internal.Key
 		ensure(ctx, func() error {
 			return r.cl.CompleteRun(ctx, r.workflow, key.Run)
 		})
+
+		r.metrics.IncComplete(time.Since(e.Timestamp))
 	}()
 
 	return r.processAck(ctx, s.ackChan, key.Run)
@@ -356,7 +375,10 @@ func (r *runner) RespondActivity(ctx context.Context, e *reflex.Event, key inter
 	s := r.runs[key.Run]
 	r.Unlock()
 
-	s.RespondActivity(e, key, message)
+	err := s.RespondActivity(e, key, message)
+	if err != nil {
+		return false, err
+	}
 
 	return r.processAck(ctx, s.ackChan, key.Run)
 }
