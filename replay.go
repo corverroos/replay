@@ -142,9 +142,11 @@ func RegisterWorkflow(getCtx func() context.Context, cl Client, cstore reflex.Cu
 
 		switch e.Type.ReflexType() {
 		case internal.CreateRun.ReflexType():
-			return r.StartRun(ctx, e, key, message)
+			_, err := r.StartRun(ctx, e, key, message)
+			return err
 		case internal.ActivityResponse.ReflexType():
-			return r.RespondActivity(ctx, e, key, message)
+			_, err := r.RespondActivity(ctx, e, key, message, false)
+			return err
 		case internal.ActivityRequest.ReflexType():
 			return nil
 		case internal.CompleteRun.ReflexType():
@@ -225,12 +227,15 @@ type runner struct {
 	runs map[string]*runState
 }
 
-func (r *runner) StartRun(ctx context.Context, e *reflex.Event, key internal.Key, args proto.Message) error {
+// StartRun starts a run goroutine and registers it with the runner. The run goroutine will call
+// the workflow function with the provided message. It blocks until an ack is received from the run goroutine.
+// It returns true if the run is still active (awaiting first activity response).
+func (r *runner) StartRun(ctx context.Context, e *reflex.Event, key internal.Key, message proto.Message) (bool, error) {
 	r.Lock()
 	defer r.Unlock()
 
 	if _, ok := r.runs[key.Run]; ok {
-		return errors.New("run already started")
+		return false, errors.New("bug: run already started")
 	}
 
 	s := &runState{
@@ -253,7 +258,7 @@ func (r *runner) StartRun(ctx context.Context, e *reflex.Event, key internal.Key
 			}
 		}()
 
-		r.run(ctx, e, key.Run, args, s)
+		r.run(ctx, e, key.Run, message, s)
 
 		ensure(ctx, func() error {
 			return r.cl.CompleteRun(ctx, r.workflow, key.Run)
@@ -263,31 +268,48 @@ func (r *runner) StartRun(ctx context.Context, e *reflex.Event, key internal.Key
 	return r.processAck(ctx, s.ackChan, key.Run)
 }
 
-func (r *runner) bootstrapRun(ctx context.Context, run string, upTo int64) error {
+// bootstrapRun bootstraps a previously started run by replaying all previous events. It returns
+// true if the run is still active after bootstrapping.
+func (r *runner) bootstrapRun(ctx context.Context, run string, upTo int64) (bool, error) {
 	el, err := r.cl.ListBootstrapEvents(ctx, r.workflow, run)
 	if err != nil {
-		return errors.Wrap(err, "list responses")
+		return false, errors.Wrap(err, "list responses")
+	}
+
+	for _, e := range el {
+		if reflex.IsType(e.Type, internal.CompleteRun) {
+			// Complete event in bootstrap list means logic changed
+			// and the run already completed before a previously requested
+			// activity's response.
+			// Ignore events after complete by skipping bootstrap.
+			log.Error(ctx, errors.New("not bootstrapping completed run"))
+			return false, nil
+		}
 	}
 
 	for i, e := range el {
 		key, err := internal.DecodeKey(e.ForeignID)
 		if err != nil {
-			return err
+			return false, err
 		}
 
 		message, err := internal.ParseMessage(&e)
 		if err != nil {
-			return err
+			return false, err
 		}
 
 		if i == 0 {
 			if !reflex.IsType(e.Type, internal.CreateRun) {
-				return errors.New("unexpected first event", j.KV("type", e.Type))
+				return false, errors.New("bug: unexpected first event", j.KV("type", e.Type))
 			}
 
-			err := r.StartRun(ctx, &e, key, message)
+			active, err := r.StartRun(ctx, &e, key, message)
 			if err != nil {
-				return err
+				return active, err
+			} else if !active {
+				// Workflow logic changed: run completed during bootstrap. Skip rest of events.
+				log.Error(ctx, errors.New("run completed during bootstrap"))
+				return false, nil
 			}
 
 			continue
@@ -297,35 +319,37 @@ func (r *runner) bootstrapRun(ctx context.Context, run string, upTo int64) error
 			break
 		}
 
-		switch e.Type.ReflexType() {
-		case internal.ActivityResponse.ReflexType():
-			err = r.RespondActivity(ctx, &e, key, message)
-			if err != nil {
-				return err
-			}
+		if !reflex.IsType(e.Type, internal.ActivityResponse) {
+			return false, errors.New("bug: unexpected type")
+		}
 
-		case internal.CompleteRun.ReflexType():
-			// Complete event in bootstrap list means logic changed
-			// and run completed with outstanding activity.
-			// Ignore events after complete by breaking bootstrap now.
-
-			// TODO(corver): If run goroutine not complete (logic changed again), should we cancel it?
-			return nil
-
-		default:
-			return errors.New("bug: unexpected type")
+		active, err := r.RespondActivity(ctx, &e, key, message, true)
+		if err != nil {
+			return false, err
+		} else if !active {
+			// Workflow logic changed: run completed during bootstrap. Skip rest of events.
+			log.Error(ctx, errors.New("run completed during bootstrap"))
+			return false, nil
 		}
 	}
 
-	return nil
+	return true, nil
 }
 
-func (r *runner) RespondActivity(ctx context.Context, e *reflex.Event, key internal.Key, message proto.Message) error {
+// RespondActivity hands the activity response over to the run goroutine and blocks until it acks.
+// If the run is not registered with this runner, it is bootstrapped.
+// It returns true if the run is still active afterwards (waiting for the subsequent activity response).
+func (r *runner) RespondActivity(ctx context.Context, e *reflex.Event, key internal.Key, message proto.Message, bootstrap bool) (bool, error) {
 	r.Lock()
 
 	if _, ok := r.runs[key.Run]; !ok {
 		// This run was previously started and is now continuing; bootstrap it.
 		r.Unlock()
+
+		if bootstrap {
+			return false, errors.New("bug: recursive bootstrapping")
+		}
+
 		return r.bootstrapRun(ctx, key.Run, e.IDInt())
 	}
 
@@ -337,8 +361,8 @@ func (r *runner) RespondActivity(ctx context.Context, e *reflex.Event, key inter
 	return r.processAck(ctx, s.ackChan, key.Run)
 }
 
-func (r *runner) run(ctx context.Context, e *reflex.Event, run string, args proto.Message, state *runState) {
-	workflowArgs := []reflect.Value{
+func (r *runner) run(ctx context.Context, e *reflex.Event, run string, message proto.Message, state *runState) {
+	args := []reflect.Value{
 		reflect.ValueOf(RunContext{
 			Context:     ctx,
 			workflow:    r.workflow,
@@ -348,34 +372,35 @@ func (r *runner) run(ctx context.Context, e *reflex.Event, run string, args prot
 			createEvent: e,
 			lastEvent:   e,
 		}),
-		reflect.ValueOf(args),
+		reflect.ValueOf(message),
 	}
 
-	reflect.ValueOf(r.workflowFunc).Call(workflowArgs)
+	reflect.ValueOf(r.workflowFunc).Call(args)
 }
 
 // processAck waits for an ack from the run goroutine and does cleanup if the run completed.
-func (r *runner) processAck(ctx context.Context, ackChan chan ack, run string) error {
+// It returns true if the run is still active; awaiting next activity response.
+func (r *runner) processAck(ctx context.Context, ackChan chan ack, run string) (bool, error) {
 	var a ack
 	select {
 	case <-ctx.Done():
-		return ctx.Err()
+		return false, ctx.Err()
 	case a = <-ackChan:
 	}
 
 	if a.await {
-		return nil
+		return true, nil
 	} else if a.complete {
 		delete(r.runs, run)
-		return nil
+		return false, nil
 	} else if a.cancel {
 		delete(r.runs, run)
-		return errors.New("run cancelled")
+		return false, errors.New("run cancelled")
 	} else if a.panic {
 		delete(r.runs, run)
-		return errors.New("run panic")
+		return false, errors.New("run panic")
 	} else {
-		return errors.New("bug: invalid ack")
+		return false, errors.New("bug: invalid ack")
 	}
 }
 
@@ -390,7 +415,7 @@ type RunContext struct {
 	lastEvent   *reflex.Event
 }
 
-func (c *RunContext) ExecActivity(activityFunc interface{}, args proto.Message, opts ...option) proto.Message {
+func (c *RunContext) ExecActivity(activityFunc interface{}, message proto.Message, opts ...option) proto.Message {
 	if err := validateActivity(activityFunc); err != nil {
 		panic(err)
 	}
@@ -410,7 +435,7 @@ func (c *RunContext) ExecActivity(activityFunc interface{}, args proto.Message, 
 	}
 
 	ensure(c, func() error {
-		return c.cl.RequestActivity(c, key.Encode(), args)
+		return c.cl.RequestActivity(c, key.Encode(), message)
 	})
 
 	res := c.state.AwaitActivity(c, key)

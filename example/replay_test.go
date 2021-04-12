@@ -229,8 +229,6 @@ func TestEarlyCompleteReplay(t *testing.T) {
 		require.True(t, reflex.IsType(el[2].Type, internal.ActivityResponse))
 		return true
 	}, time.Second, time.Millisecond*10)
-	// Late response causes another bootstrap and duplicate complete
-	require.Equal(t, t.Name(), <-completeChan)
 
 	// Do another noop run, ensure it completes even though above had response after the complete.
 	err = cl.RunWorkflow(context.Background(), name, "flush", new(Empty))
@@ -240,6 +238,54 @@ func TestEarlyCompleteReplay(t *testing.T) {
 	el, err = cl.ListBootstrapEvents(context.Background(), name, "flush")
 	jtest.RequireNil(t, err)
 	require.Len(t, el, 2)
+}
+
+func TestBootstrapComplete(t *testing.T) {
+	dbc := test.ConnectDB(t)
+	cl := logical.New(dbc)
+	ctx := context.Background()
+	cstore := new(test.MemCursorStore)
+	errsChan := make(chan string)
+	tcl1 := &testClient{
+		Client:       cl,
+		activityErrs: map[string]error{"PrintGreeting": io.EOF},
+		completeChan: make(chan string),
+		errsChan:     errsChan,
+	}
+
+	workflow := makeWorkflow(5)
+	name := "test_workflow"
+
+	var b Backends
+	replay.RegisterActivity(testCtx(t), cl, cstore, b, EnrichGreeting)
+	replay.RegisterActivity(testCtx(t), cl, cstore, b, PrintGreeting)
+	// This workflow will block right before ctx.ExecActivity(PrintGreeting, name)
+	replay.RegisterWorkflow(testCtx(t), tcl1, cstore, workflow, replay.WithName(name))
+
+	err := cl.RunWorkflow(context.Background(), name, t.Name(), &String{Value: "World"})
+	jtest.RequireNil(t, err)
+
+	activity := <-errsChan
+	require.Equal(t, activity, "PrintGreeting")
+
+	noop := func(ctx replay.RunContext, _ *String) {}
+	completeChan := make(chan string)
+	tcl2 := &testClient{
+		Client:       cl,
+		completeChan: completeChan,
+	}
+	// This workflow will complete during bootstrap
+	replay.RegisterWorkflow(testCtx(t), tcl2, cstore, noop, replay.WithName(name))
+	run := <-completeChan
+	require.Equal(t, t.Name(), run)
+
+	el, err := cl.ListBootstrapEvents(ctx, name, run)
+	jtest.RequireNil(t, err)
+	require.Len(t, el, 7) // No PrintGreeting response
+	require.True(t, reflex.IsType(el[0].Type, internal.CreateRun))
+	require.True(t, reflex.IsType(el[1].Type, internal.ActivityResponse))
+	require.True(t, reflex.IsType(el[5].Type, internal.ActivityResponse))
+	require.True(t, reflex.IsType(el[6].Type, internal.CompleteRun))
 }
 
 func makeWorkflow(n int) func(ctx replay.RunContext, name *String) {
