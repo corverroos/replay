@@ -67,8 +67,16 @@ func RegisterActivity(getCtx func() context.Context, cl Client, cstore reflex.Cu
 		opt(&o)
 	}
 	activity := o.nameFunc(activityFunc)
+	metrics := o.activityMetrics(namespace, activity)
 
-	fn := func(ctx context.Context, f fate.Fate, e *reflex.Event) error {
+	fn := func(ctx context.Context, f fate.Fate, e *reflex.Event) (err error) {
+		defer func(t0 time.Time) {
+			metrics.IncComplete(time.Since(t0))
+			if err != nil {
+				metrics.IncErrors() // NoReturnErr: Just incrementing metrics here.
+			}
+		}(time.Now())
+
 		if !reflex.IsType(e.Type, internal.ActivityRequest) {
 			return nil
 		}
@@ -119,7 +127,7 @@ func RegisterWorkflow(getCtx func() context.Context, cl Client, cstore reflex.Cu
 		opt(&o)
 	}
 	workflow := o.nameFunc(workflowFunc)
-	metrics := o.workflowMetrics(workflow)
+	metrics := o.workflowMetrics(namespace, workflow)
 
 	r := runner{
 		cl:           cl.Internal(),
@@ -132,8 +140,7 @@ func RegisterWorkflow(getCtx func() context.Context, cl Client, cstore reflex.Cu
 	fn := func(ctx context.Context, f fate.Fate, e *reflex.Event) (err error) {
 		defer func() {
 			if err != nil {
-				// NoReturnErr: Just incrementing metrics here.
-				metrics.IncErrors()
+				metrics.IncErrors() // NoReturnErr: Just incrementing metrics here.
 			}
 		}()
 

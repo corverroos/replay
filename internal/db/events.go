@@ -136,8 +136,16 @@ func inserter(ctx context.Context, tx *sql.Tx,
 		return err
 	}
 
-	if k.Run == "" && reflex.IsAnyType(typ, internal.ActivityRequest, internal.ActivityResponse) {
-		return errors.New("activity missing run", j.KS("key", key))
+	if k.Namespace == "" {
+		return errors.New("namespace empty", j.KS("key", key))
+	} else if k.Workflow == "" {
+		return errors.New("workflow empty", j.KS("key", key))
+	} else if k.Run == "" && reflex.IsAnyType(typ, internal.ActivityRequest, internal.ActivityResponse) {
+		return errors.New("run empty", j.KS("key", key))
+	} else if k.Activity == "" && reflex.IsAnyType(typ, internal.ActivityRequest, internal.ActivityResponse) {
+		return errors.New("activity empty", j.KS("key", key))
+	} else if k.Sequence == "" && reflex.IsAnyType(typ, internal.ActivityRequest, internal.ActivityResponse) {
+		return errors.New("sequence empty", j.KS("key", key))
 	}
 
 	var run sql.NullString

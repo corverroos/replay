@@ -335,7 +335,7 @@ func TestOutOfOrderResponses(t *testing.T) {
 	// This workflow will error during bootstrap since the activity order changed
 	errChan := make(chan struct{})
 	replay.RegisterWorkflow(testCtx(t), tcl2, cstore, "ns", makeWorkflow(1), replay.WithName(name),
-		replay.WithWorkflowMetrics(func(workflow string) replay.Metrics {
+		replay.WithWorkflowMetrics(func(_, _ string) replay.Metrics {
 			return replay.Metrics{
 				IncErrors: func() {
 					errChan <- struct{}{}
