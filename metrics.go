@@ -36,7 +36,7 @@ var (
 		Namespace: "replay",
 		Subsystem: "client",
 		Name:      "activity_duration_seconds",
-		Help:      "Activity duration in seconds.",
+		Help:      "Params duration in seconds.",
 		Buckets:   []float64{.005, .01, .025, .05, .1, .25, .5, 1, 2.5, 5, 10, 60, 300, 600},
 	}, []string{"namespace", "activity"})
 )

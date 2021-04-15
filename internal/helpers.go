@@ -3,6 +3,7 @@ package internal
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"path"
 	"strconv"
 	"strings"
@@ -15,8 +16,13 @@ import (
 	"github.com/luno/reflex/reflexpb"
 )
 
-const ActivitySleep = "replay_sleep"
-const ActivitySignal = "replay_signal"
+const (
+	ActivitySleep  = "replay_sleep"
+	ActivitySignal = "replay_signal"
+
+	paramActivity = "a"
+	paramSequence = "n"
+)
 
 type EventType int
 
@@ -87,33 +93,61 @@ type Key struct {
 	Namespace string
 	Workflow  string
 	Run       string
-	Activity  string
-	Sequence  string
+
+	Activity string
+	Sequence string
 }
 
 func (k Key) Encode() string {
-	return path.Join(k.Namespace, k.Workflow, k.Run, k.Activity, k.Sequence)
+	p := path.Join(k.Namespace, k.Workflow, k.Run)
+
+	v := make(url.Values)
+	if k.Activity != "" {
+		v.Set(paramActivity, k.Activity)
+	}
+	if k.Sequence != "" {
+		v.Set(paramSequence, k.Sequence)
+	}
+
+	if len(v) == 0 {
+		return p
+	}
+
+	return p + "?" + v.Encode()
 }
 
 func DecodeKey(key string) (Key, error) {
-	split := strings.Split(key, "/")
-	if len(split) < 3 {
+	split1 := strings.Split(key, "?")
+	if len(split1) > 2 || len(split1) == 0 || key == "" {
 		return Key{}, errors.New("invalid key")
 	}
+
+	split2 := strings.Split(split1[0], "/")
+	if len(split2) != 3 {
+		return Key{}, errors.New("invalid key")
+	}
+
 	var k Key
-	for i, s := range split {
+	for i, s := range split2 {
 		if i == 0 {
 			k.Namespace = s
 		} else if i == 1 {
 			k.Workflow = s
 		} else if i == 2 {
 			k.Run = s
-		} else if i == 3 {
-			k.Activity = s
-		} else {
-			k.Sequence = s
 		}
 	}
+
+	if len(split1) > 1 {
+		v, err := url.ParseQuery(split1[1])
+		if err != nil {
+			return Key{}, errors.New("invalid key params")
+		}
+
+		k.Activity = v.Get(paramActivity)
+		k.Sequence = v.Get(paramSequence)
+	}
+
 	return k, nil
 }
 
