@@ -71,10 +71,10 @@ func CleanCache(t *testing.T) {
 	})
 }
 
-func ListBootstrapEvents(ctx context.Context, dbc *sql.DB, namespace, workflow, run string) ([]reflex.Event, error) {
+func ListBootstrapEvents(ctx context.Context, dbc *sql.DB, namespace, workflow, run string, iter int) ([]reflex.Event, error) {
 	rows, err := dbc.QueryContext(ctx, "select id, `key`, type, timestamp, message "+
-		"from replay_events where namespace=? and workflow=? and run=? and (type=? or type=? or type=?) order by id asc",
-		namespace, workflow, run, internal.CreateRun, internal.ActivityResponse, internal.CompleteRun)
+		"from replay_events where namespace=? and workflow=? and run=? and iteration = ? and (type=? or type=? or type=?) order by id asc",
+		namespace, workflow, run, iter, internal.CreateRun, internal.ActivityResponse, internal.CompleteRun)
 	if err != nil {
 		return nil, err
 	}
@@ -155,6 +155,6 @@ func inserter(ctx context.Context, tx *sql.Tx,
 	}
 
 	_, err = tx.ExecContext(ctx, "insert into replay_events set `key`=?, namespace=?, workflow=?, run=?, "+
-		"timestamp=now(3), type=?, message=?", key, k.Namespace, k.Workflow, run, typ, message)
+		"iteration=?, timestamp=now(3), type=?, message=?", key, k.Namespace, k.Workflow, run, k.Iteration, typ, message)
 	return err
 }

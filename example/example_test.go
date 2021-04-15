@@ -196,10 +196,10 @@ func (c *testClient) Internal() internal.Client {
 	return c
 }
 
-func (c *testClient) CompleteRun(ctx context.Context, namespace, workflow, run string) error {
+func (c *testClient) CompleteRun(ctx context.Context, namespace, workflow, run string, iter int) error {
 	defer func() { c.completeChan <- run }()
 
-	return c.Client.CompleteRun(ctx, namespace, workflow, run)
+	return c.Client.CompleteRun(ctx, namespace, workflow, run, iter)
 }
 
 func (c *testClient) RequestActivity(ctx context.Context, key string, args proto.Message) error {

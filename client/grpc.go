@@ -22,16 +22,20 @@ type Client struct {
 }
 
 func (c *Client) RunWorkflow(ctx context.Context, namespace, workflow, run string, message proto.Message) error {
+	key := internal.MinKey(namespace, workflow, run, 0)
+
+	return c.RunWorkflowInternal(ctx, key, message)
+}
+
+func (c *Client) RunWorkflowInternal(ctx context.Context, key string, message proto.Message) error {
 	anyMsg, err := internal.ToAny(message)
 	if err != nil {
 		return err
 	}
 
 	_, err = c.clpb.RunWorkflow(ctx, &pb.RunRequest{
-		Namespace: namespace,
-		Workflow:  workflow,
-		Run:       run,
-		Message:   anyMsg,
+		Key:     key,
+		Message: anyMsg,
 	})
 	return err
 }
@@ -83,20 +87,16 @@ func (c *Client) RespondActivity(ctx context.Context, key string, message proto.
 	return c.RespondActivityRaw(ctx, key, anyMsg)
 }
 
-func (c *Client) CompleteRun(ctx context.Context, namespace, workflow, run string) error {
+func (c *Client) CompleteRun(ctx context.Context, namespace, workflow, run string, iter int) error {
 	_, err := c.clpb.CompleteRun(ctx, &pb.CompleteRequest{
-		Namespace: namespace,
-		Workflow:  workflow,
-		Run:       run,
+		Key: internal.MinKey(namespace, workflow, run, iter),
 	})
 	return err
 }
 
-func (c *Client) ListBootstrapEvents(ctx context.Context, namespace, workflow, run string) ([]reflex.Event, error) {
+func (c *Client) ListBootstrapEvents(ctx context.Context, namespace, workflow, run string, iter int) ([]reflex.Event, error) {
 	rl, err := c.clpb.ListBootstrapEvents(ctx, &pb.ListBootstrapRequest{
-		Namespace: namespace,
-		Workflow:  workflow,
-		Run:       run,
+		Key: internal.MinKey(namespace, workflow, run, iter),
 	})
 	if err != nil {
 		return nil, err

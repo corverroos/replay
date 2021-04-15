@@ -43,6 +43,44 @@ func TestNoopWorkflow(t *testing.T) {
 	}
 }
 
+func TestRestart(t *testing.T) {
+	dbc := test.ConnectDB(t)
+	ctx := context.Background()
+	cl := logical.New(dbc)
+	cstore := new(test.MemCursorStore)
+
+	name := "restart"
+	restart := func(ctx replay.RunContext, msg *Empty) {
+		// Note this just tests restart.
+		key, _ := internal.DecodeKey(ctx.CreateEvent().ForeignID)
+		if key.Iteration < 5 {
+			ctx.Restart(msg)
+		}
+	}
+
+	completeChan := make(chan string)
+	tcl := &testClient{
+		cl:           cl,
+		Client:       cl.Internal(),
+		completeChan: completeChan,
+	}
+	replay.RegisterWorkflow(testCtx(t), tcl, cstore, "ns", restart, replay.WithName(name))
+
+	err := cl.RunWorkflow(ctx, "ns", name, t.Name(), new(Empty))
+	jtest.RequireNil(t, err)
+
+	for i := 0; i < 5; i++ {
+		require.Equal(t, t.Name(), <-completeChan)
+		el, err := cl.Internal().ListBootstrapEvents(ctx, "ns", name, t.Name(), i)
+		jtest.RequireNil(t, err)
+		require.Len(t, el, 2)
+	}
+
+	el, err := cl.Internal().ListBootstrapEvents(ctx, "ns", name, t.Name(), 6)
+	jtest.RequireNil(t, err)
+	require.Len(t, el, 0)
+}
+
 func TestActivityFunc(t *testing.T) {
 	require.PanicsWithError(t,
 		"invalid activity function, input parameters not "+
@@ -151,7 +189,7 @@ func TestIdenticalReplay(t *testing.T) {
 	activity := <-errsChan
 	require.Equal(t, activity, "PrintGreeting")
 
-	el, err := cl.Internal().ListBootstrapEvents(ctx, "ns", name, t.Name())
+	el, err := cl.Internal().ListBootstrapEvents(ctx, "ns", name, t.Name(), 0)
 	jtest.RequireNil(t, err)
 	require.Len(t, el, 6)
 
@@ -165,7 +203,7 @@ func TestIdenticalReplay(t *testing.T) {
 	run := <-completeChan
 	require.Equal(t, t.Name(), run)
 
-	el, err = cl.Internal().ListBootstrapEvents(ctx, "ns", name, run)
+	el, err = cl.Internal().ListBootstrapEvents(ctx, "ns", name, run, 0)
 	jtest.RequireNil(t, err)
 	require.Len(t, el, 8)
 }
@@ -210,7 +248,7 @@ func TestEarlyCompleteReplay(t *testing.T) {
 	cancel()
 
 	// Ensure only 1 event, CreateRun
-	el, err := cl.Internal().ListBootstrapEvents(context.Background(), "ns", name, t.Name())
+	el, err := cl.Internal().ListBootstrapEvents(context.Background(), "ns", name, t.Name(), 0)
 	jtest.RequireNil(t, err)
 	require.Len(t, el, 1)
 
@@ -224,7 +262,7 @@ func TestEarlyCompleteReplay(t *testing.T) {
 
 	// Wait for 3 events: CreateRun, Complete, Response
 	require.Eventually(t, func() bool {
-		el, err = cl.Internal().ListBootstrapEvents(context.Background(), "ns", name, t.Name())
+		el, err = cl.Internal().ListBootstrapEvents(context.Background(), "ns", name, t.Name(), 0)
 		jtest.RequireNil(t, err)
 		if len(el) < 3 {
 			return false
@@ -241,7 +279,7 @@ func TestEarlyCompleteReplay(t *testing.T) {
 	jtest.RequireNil(t, err)
 	require.Equal(t, "flush", <-completeChan)
 
-	el, err = cl.Internal().ListBootstrapEvents(context.Background(), "ns", name, "flush")
+	el, err = cl.Internal().ListBootstrapEvents(context.Background(), "ns", name, "flush", 0)
 	jtest.RequireNil(t, err)
 	require.Len(t, el, 2)
 }
@@ -287,7 +325,7 @@ func TestBootstrapComplete(t *testing.T) {
 	run := <-completeChan
 	require.Equal(t, t.Name(), run)
 
-	el, err := cl.Internal().ListBootstrapEvents(ctx, "ns", name, run)
+	el, err := cl.Internal().ListBootstrapEvents(ctx, "ns", name, run, 0)
 	jtest.RequireNil(t, err)
 	require.Len(t, el, 7) // No PrintGreeting response
 	require.True(t, reflex.IsType(el[0].Type, internal.CreateRun))
@@ -346,7 +384,7 @@ func TestOutOfOrderResponses(t *testing.T) {
 		}))
 	<-errChan
 
-	el, err := cl.Internal().ListBootstrapEvents(ctx, "ns", name, t.Name())
+	el, err := cl.Internal().ListBootstrapEvents(ctx, "ns", name, t.Name(), 0)
 	jtest.RequireNil(t, err)
 	require.Len(t, el, 6)
 	require.True(t, reflex.IsType(el[0].Type, internal.CreateRun))

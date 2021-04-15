@@ -29,7 +29,7 @@ func (s *Server) RunWorkflow(ctx context.Context, req *pb.RunRequest) (*pb.Empty
 		return nil, err
 	}
 
-	return new(pb.Empty), db.Insert(ctx, s.dbc, internal.ShortKey(req.Namespace, req.Workflow, req.Run), internal.CreateRun, b)
+	return new(pb.Empty), db.Insert(ctx, s.dbc, req.Key, internal.CreateRun, b)
 }
 
 func (s *Server) SignalRun(ctx context.Context, req *pb.SignalRequest) (*pb.Empty, error) {
@@ -55,11 +55,16 @@ func (s *Server) RespondActivity(ctx context.Context, req *pb.ActivityMessage) (
 }
 
 func (s *Server) CompleteRun(ctx context.Context, req *pb.CompleteRequest) (*pb.Empty, error) {
-	return swallowErrDup(db.Insert(ctx, s.dbc, internal.ShortKey(req.Namespace, req.Workflow, req.Run), internal.CompleteRun, nil))
+	return swallowErrDup(db.Insert(ctx, s.dbc, req.Key, internal.CompleteRun, nil))
 }
 
 func (s *Server) ListBootstrapEvents(ctx context.Context, req *pb.ListBootstrapRequest) (*pb.Events, error) {
-	el, err := db.ListBootstrapEvents(ctx, s.dbc, req.Namespace, req.Workflow, req.Run)
+	key, err := internal.DecodeKey(req.Key)
+	if err != nil {
+		return nil, err
+	}
+
+	el, err := db.ListBootstrapEvents(ctx, s.dbc, key.Namespace, key.Workflow, key.Run, key.Iteration)
 	if err != nil {
 		return nil, err
 	}

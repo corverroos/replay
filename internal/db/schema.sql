@@ -14,12 +14,13 @@ CREATE TABLE `replay_events` (
   `namespace` varchar(255) NOT NULL,
   `workflow` varchar(255) NOT NULL,
   `run` varchar(255) DEFAULT NULL,
+  `iteration` int(11) NOT NULL,
   `type` int(11) NOT NULL,
   `timestamp` datetime(3) NOT NULL,
   `message` mediumblob,
   PRIMARY KEY (`id`),
   UNIQUE KEY `by_type_key` (`type`,`key`),
-  KEY `type` (`type`,`namespace`,`workflow`,`run`)
+  KEY `type` (`type`,`namespace`,`workflow`,`run`,`iteration`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
 
 CREATE TABLE `replay_signal_awaits` (

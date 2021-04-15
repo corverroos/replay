@@ -29,10 +29,8 @@ message Events {
 }
 
 message RunRequest {
-  string namespace = 1;
-  string workflow = 2;
-  string run = 3;
-  google.protobuf.Any message = 4;
+  string key = 1;
+  google.protobuf.Any message = 2;
 }
 
 message SignalRequest {
@@ -50,15 +48,11 @@ message ActivityMessage {
 }
 
 message CompleteRequest {
-  string namespace = 1;
-  string workflow = 2;
-  string run = 3;
+  string key = 1;
 }
 
 message ListBootstrapRequest {
-  string namespace = 1;
-  string workflow = 2;
-  string run = 3;
+  string key = 1;
 }
 
 message StreamRequest {
