@@ -28,7 +28,9 @@ func (c *Client) RunWorkflow(ctx context.Context, namespace, workflow, run strin
 		return err
 	}
 
-	return db.Insert(ctx, c.dbc, internal.ShortKey(namespace, workflow, run), internal.CreateRun, b)
+	key := internal.MinKey(namespace, workflow, run, 0)
+
+	return db.Insert(ctx, c.dbc, key, internal.CreateRun, b)
 }
 
 func (c *Client) SignalRun(ctx context.Context, namespace, workflow, run string, s replay.Signal, message proto.Message, extID string) error {
@@ -67,12 +69,21 @@ func (c *Client) RespondActivityRaw(ctx context.Context, key string, message *an
 	return swallowErrDup(db.Insert(ctx, c.dbc, key, internal.ActivityResponse, b))
 }
 
-func (c *Client) CompleteRun(ctx context.Context, namespace, workflow, run string) error {
-	return swallowErrDup(db.Insert(ctx, c.dbc, internal.ShortKey(namespace, workflow, run), internal.CompleteRun, nil))
+func (c *Client) CompleteRun(ctx context.Context, key string) error {
+	return swallowErrDup(db.Insert(ctx, c.dbc, key, internal.CompleteRun, nil))
 }
 
-func (c *Client) ListBootstrapEvents(ctx context.Context, namespace, workflow, run string) ([]reflex.Event, error) {
-	return db.ListBootstrapEvents(ctx, c.dbc, namespace, workflow, run)
+func (c *Client) RestartRun(ctx context.Context, key string, message proto.Message) error {
+	b, err := toBytes(message)
+	if err != nil {
+		return err
+	}
+
+	return db.RestartRun(ctx, c.dbc, key, b)
+}
+
+func (c *Client) ListBootstrapEvents(ctx context.Context, key string) ([]reflex.Event, error) {
+	return db.ListBootstrapEvents(ctx, c.dbc, key)
 }
 
 func (c *Client) Stream(namespace string) reflex.StreamFunc {

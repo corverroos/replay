@@ -7,13 +7,14 @@ CREATE TABLE replay_events (
   namespace VARCHAR(255) NOT NULL, 
   workflow VARCHAR(255) NOT NULL,
   run VARCHAR(255),
+  iteration INT NOT NULL,
   type INT NOT NULL,
   timestamp DATETIME(3) NOT NULL,
   message MEDIUMBLOB,
 
   PRIMARY KEY (id),
   UNIQUE by_type_key (type, ` + "`key`" + `),
-  INDEX (type, namespace, workflow, run)
+  INDEX (type, namespace, workflow, run, iteration)
 );
 `, `
 CREATE TABLE replay_sleeps (

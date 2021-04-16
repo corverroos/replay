@@ -28,10 +28,8 @@ func (c *Client) RunWorkflow(ctx context.Context, namespace, workflow, run strin
 	}
 
 	_, err = c.clpb.RunWorkflow(ctx, &pb.RunRequest{
-		Namespace: namespace,
-		Workflow:  workflow,
-		Run:       run,
-		Message:   anyMsg,
+		Key:     internal.MinKey(namespace, workflow, run, 0),
+		Message: anyMsg,
 	})
 	return err
 }
@@ -83,20 +81,29 @@ func (c *Client) RespondActivity(ctx context.Context, key string, message proto.
 	return c.RespondActivityRaw(ctx, key, anyMsg)
 }
 
-func (c *Client) CompleteRun(ctx context.Context, namespace, workflow, run string) error {
+func (c *Client) CompleteRun(ctx context.Context, key string) error {
 	_, err := c.clpb.CompleteRun(ctx, &pb.CompleteRequest{
-		Namespace: namespace,
-		Workflow:  workflow,
-		Run:       run,
+		Key: key,
 	})
 	return err
 }
 
-func (c *Client) ListBootstrapEvents(ctx context.Context, namespace, workflow, run string) ([]reflex.Event, error) {
+func (c *Client) RestartRun(ctx context.Context, key string, message proto.Message) error {
+	anyMsg, err := internal.ToAny(message)
+	if err != nil {
+		return err
+	}
+
+	_, err = c.clpb.RestartRun(ctx, &pb.RunRequest{
+		Key:     key,
+		Message: anyMsg,
+	})
+	return err
+}
+
+func (c *Client) ListBootstrapEvents(ctx context.Context, key string) ([]reflex.Event, error) {
 	rl, err := c.clpb.ListBootstrapEvents(ctx, &pb.ListBootstrapRequest{
-		Namespace: namespace,
-		Workflow:  workflow,
-		Run:       run,
+		Key: key,
 	})
 	if err != nil {
 		return nil, err

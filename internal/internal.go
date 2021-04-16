@@ -87,17 +87,18 @@ type Key struct {
 	Namespace string
 	Workflow  string
 	Run       string
+	Iteration int
 	Activity  string
 	Sequence  string
 }
 
 func (k Key) Encode() string {
-	return path.Join(k.Namespace, k.Workflow, k.Run, k.Activity, k.Sequence)
+	return path.Join(k.Namespace, k.Workflow, k.Run, strconv.Itoa(k.Iteration), k.Activity, k.Sequence)
 }
 
 func DecodeKey(key string) (Key, error) {
 	split := strings.Split(key, "/")
-	if len(split) < 3 {
+	if len(split) < 4 {
 		return Key{}, errors.New("invalid key")
 	}
 	var k Key
@@ -109,6 +110,12 @@ func DecodeKey(key string) (Key, error) {
 		} else if i == 2 {
 			k.Run = s
 		} else if i == 3 {
+			var err error
+			k.Iteration, err = strconv.Atoi(s)
+			if err != nil {
+				return Key{}, err
+			}
+		} else if i == 4 {
 			k.Activity = s
 		} else {
 			k.Sequence = s
@@ -147,11 +154,12 @@ func EventFromProto(e *reflexpb.Event) (*reflex.Event, error) {
 	}, nil
 }
 
-func ShortKey(namespace, workflow, run string) string {
+func MinKey(namespace, workflow, run string, iteration int) string {
 	return Key{
 		Namespace: namespace,
 		Workflow:  workflow,
 		Run:       run,
+		Iteration: iteration,
 	}.Encode()
 }
 
@@ -189,8 +197,11 @@ type Client interface {
 	RespondActivityRaw(ctx context.Context, key string, message *any.Any) error
 
 	// CompleteRun inserts a RunComplete event.
-	CompleteRun(ctx context.Context, namespace, workflow, run string) error
+	CompleteRun(ctx context.Context, key string) error
+
+	// RestartRun completes the current run iteration and start the next iteration with the provided message.
+	RestartRun(ctx context.Context, key string, message proto.Message) error
 
 	// ListBootstrapEvents returns the boostrap events for the run.
-	ListBootstrapEvents(ctx context.Context, namespace, workflow, run string) ([]reflex.Event, error)
+	ListBootstrapEvents(ctx context.Context, key string) ([]reflex.Event, error)
 }

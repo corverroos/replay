@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"testing"
 
+	"github.com/corverroos/replay"
 	"github.com/corverroos/replay/internal"
 	"github.com/luno/jettison/errors"
 	"github.com/luno/jettison/j"
@@ -71,10 +72,51 @@ func CleanCache(t *testing.T) {
 	})
 }
 
-func ListBootstrapEvents(ctx context.Context, dbc *sql.DB, namespace, workflow, run string) ([]reflex.Event, error) {
+func RestartRun(ctx context.Context, dbc *sql.DB, key string, message []byte) error {
+	k, err := internal.DecodeKey(key)
+	if err != nil {
+		return err
+	}
+
+	tx, err := dbc.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	// Mark previous iteration as complete
+	notify1, err := insertTX(ctx, tx, key, internal.CompleteRun, nil)
+	if errors.Is(err, replay.ErrDuplicate) {
+		// NoReturnErr: Continue below
+	} else if err != nil {
+		return err
+	} else {
+		defer notify1()
+	}
+
+	// Start next iteration.
+	k.Iteration++
+	notify2, err := insertTX(ctx, tx, k.Encode(), internal.CreateRun, message)
+	if errors.Is(err, replay.ErrDuplicate) {
+		// NoReturnErr: Continue below
+	} else if err != nil {
+		return err
+	} else {
+		defer notify2()
+	}
+
+	return tx.Commit()
+}
+
+func ListBootstrapEvents(ctx context.Context, dbc *sql.DB, key string) ([]reflex.Event, error) {
+	k, err := internal.DecodeKey(key)
+	if err != nil {
+		return nil, err
+	}
+
 	rows, err := dbc.QueryContext(ctx, "select id, `key`, type, timestamp, message "+
-		"from replay_events where namespace=? and workflow=? and run=? and (type=? or type=? or type=?) order by id asc",
-		namespace, workflow, run, internal.CreateRun, internal.ActivityResponse, internal.CompleteRun)
+		"from replay_events where namespace=? and workflow=? and run=? and iteration = ? and (type=? or type=? or type=?) order by id asc",
+		k.Namespace, k.Workflow, k.Run, k.Iteration, internal.CreateRun, internal.ActivityResponse, internal.CompleteRun)
 	if err != nil {
 		return nil, err
 	}
@@ -106,26 +148,35 @@ func Insert(ctx context.Context, dbc *sql.DB, key string, typ internal.EventType
 	}
 	defer tx.Rollback()
 
-	// Do lookup to avoid creating tons of gaps when replaying long running runs.
-	var exists int
-	err = tx.QueryRowContext(ctx, "select exists("+
-		"select 1 from replay_events where `key` = ? and type = ?)", key, typ).
-		Scan(&exists)
+	notify, err := insertTX(ctx, tx, key, typ, message)
 	if err != nil {
-		return err
-	} else if exists == 1 {
-		return nil
-	}
-
-	notify, err := events.InsertWithMetadata(ctx, tx, key, typ, message)
-	if err, ok := MaybeWrapErrDuplicate(err, "by_type_key"); ok {
-		return errors.Wrap(err, "insert")
-	} else if err != nil {
 		return err
 	}
 	defer notify()
 
 	return tx.Commit()
+}
+
+func insertTX(ctx context.Context, tx *sql.Tx, key string, typ internal.EventType, message []byte) (rsql.NotifyFunc, error) {
+	// Do lookup to avoid creating tons of gaps when replaying long running runs.
+	var exists int
+	err := tx.QueryRowContext(ctx, "select exists("+
+		"select 1 from replay_events where `key` = ? and type = ?)", key, typ).
+		Scan(&exists)
+	if err != nil {
+		return nil, err
+	} else if exists == 1 {
+		return func() {}, nil
+	}
+
+	notify, err := events.InsertWithMetadata(ctx, tx, key, typ, message)
+	if err, ok := MaybeWrapErrDuplicate(err, "by_type_key"); ok {
+		return nil, errors.Wrap(err, "insert")
+	} else if err != nil {
+		return nil, err
+	}
+
+	return notify, nil
 }
 
 func inserter(ctx context.Context, tx *sql.Tx,
@@ -155,6 +206,6 @@ func inserter(ctx context.Context, tx *sql.Tx,
 	}
 
 	_, err = tx.ExecContext(ctx, "insert into replay_events set `key`=?, namespace=?, workflow=?, run=?, "+
-		"timestamp=now(3), type=?, message=?", key, k.Namespace, k.Workflow, run, typ, message)
+		"iteration=?, timestamp=now(3), type=?, message=?", key, k.Namespace, k.Workflow, run, k.Iteration, typ, message)
 	return err
 }

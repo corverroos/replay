@@ -23,7 +23,9 @@ import (
 )
 
 var ErrDuplicate = errors.New("duplicate entry", j.C("ERR_96713b1c52c5d59f"))
-var cancel = struct{}{}
+
+const cancel = "cancel"
+const restart = "restart"
 
 // Client defines the main replay server API.
 type Client interface {
@@ -280,6 +282,8 @@ func (r *runner) StartRun(ctx context.Context, e *reflex.Event, key internal.Key
 			if r := recover(); r == cancel {
 				log.Error(ctx, errors.New("run cancelled"), j.MKV{"key": key.Encode()})
 				s.ackChan <- ack{cancel: true}
+			} else if r == restart {
+				s.ackChan <- ack{complete: true}
 			} else if r != nil {
 				log.Error(ctx, errors.New("run panic"), j.MKV{"key": key.Encode(), "panic": r})
 				s.ackChan <- ack{panic: true}
@@ -288,10 +292,10 @@ func (r *runner) StartRun(ctx context.Context, e *reflex.Event, key internal.Key
 			}
 		}()
 
-		r.run(ctx, e, key.Run, message, s)
+		r.run(ctx, e, key.Run, key.Iteration, message, s)
 
 		ensure(ctx, func() error {
-			return r.cl.CompleteRun(ctx, r.namespace, r.workflow, key.Run)
+			return r.cl.CompleteRun(ctx, internal.MinKey(r.namespace, r.workflow, key.Run, key.Iteration))
 		})
 
 		r.metrics.IncComplete(time.Since(e.Timestamp))
@@ -302,8 +306,8 @@ func (r *runner) StartRun(ctx context.Context, e *reflex.Event, key internal.Key
 
 // bootstrapRun bootstraps a previously started run by replaying all previous events. It returns
 // true if the run is still active after bootstrapping.
-func (r *runner) bootstrapRun(ctx context.Context, run string, upTo int64) (bool, error) {
-	el, err := r.cl.ListBootstrapEvents(ctx, r.namespace, r.workflow, run)
+func (r *runner) bootstrapRun(ctx context.Context, run string, iter int, upTo int64) (bool, error) {
+	el, err := r.cl.ListBootstrapEvents(ctx, internal.MinKey(r.namespace, r.workflow, run, iter))
 	if err != nil {
 		return false, errors.Wrap(err, "list responses")
 	}
@@ -382,7 +386,7 @@ func (r *runner) RespondActivity(ctx context.Context, e *reflex.Event, key inter
 			return false, errors.New("bug: recursive bootstrapping")
 		}
 
-		return r.bootstrapRun(ctx, key.Run, e.IDInt())
+		return r.bootstrapRun(ctx, key.Run, key.Iteration, e.IDInt())
 	}
 
 	s := r.runs[key.Run]
@@ -396,13 +400,14 @@ func (r *runner) RespondActivity(ctx context.Context, e *reflex.Event, key inter
 	return r.processAck(ctx, s.ackChan, key.Run)
 }
 
-func (r *runner) run(ctx context.Context, e *reflex.Event, run string, message proto.Message, state *runState) {
+func (r *runner) run(ctx context.Context, e *reflex.Event, run string, iter int, message proto.Message, state *runState) {
 	args := []reflect.Value{
 		reflect.ValueOf(RunContext{
 			Context:     ctx,
 			namespace:   r.namespace,
 			workflow:    r.workflow,
 			run:         run,
+			iter:        iter,
 			state:       state,
 			cl:          r.cl,
 			createEvent: e,
@@ -445,11 +450,21 @@ type RunContext struct {
 	namespace string
 	workflow  string
 	run       string
+	iter      int
 	state     *runState
 	cl        internal.Client
 
 	createEvent *reflex.Event
 	lastEvent   *reflex.Event
+}
+
+func (c *RunContext) Restart(message proto.Message) {
+	// TODO(corver): Maybe add option to drain signals.
+	ensure(c, func() error {
+		return c.cl.RestartRun(c, internal.MinKey(c.namespace, c.workflow, c.run, c.iter), message)
+	})
+
+	panic(restart)
 }
 
 func (c *RunContext) ExecActivity(activityFunc interface{}, message proto.Message, opts ...option) proto.Message {
@@ -468,6 +483,7 @@ func (c *RunContext) ExecActivity(activityFunc interface{}, message proto.Messag
 		Namespace: c.namespace,
 		Workflow:  c.workflow,
 		Run:       c.run,
+		Iteration: c.iter,
 		Activity:  activity,
 		Sequence:  fmt.Sprint(index),
 	}
@@ -492,6 +508,7 @@ func (c *RunContext) AwaitSignal(s Signal, duration time.Duration) (proto.Messag
 		Namespace: c.namespace,
 		Workflow:  c.workflow,
 		Run:       c.run,
+		Iteration: c.iter,
 		Activity:  activity,
 		Sequence:  seq.Encode(),
 	}
@@ -516,6 +533,7 @@ func (c *RunContext) Sleep(duration time.Duration) {
 		Namespace: c.namespace,
 		Workflow:  c.workflow,
 		Run:       c.run,
+		Iteration: c.iter,
 		Activity:  activity,
 		Sequence:  fmt.Sprint(index),
 	}
