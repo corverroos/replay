@@ -187,9 +187,6 @@ func Marshal(message proto.Message) ([]byte, error) {
 
 // Client defines the replay server's internal API. It may only be used by the replay package itself.
 type Client interface {
-	// RunWorkflowInternal inserts a create event for the run but allows next iterations.
-	RunWorkflowInternal(ctx context.Context, key string, message proto.Message) error
-
 	// RequestActivity inserts a ActivityRequest event.
 	RequestActivity(ctx context.Context, key string, message proto.Message) error
 
@@ -200,8 +197,11 @@ type Client interface {
 	RespondActivityRaw(ctx context.Context, key string, message *any.Any) error
 
 	// CompleteRun inserts a RunComplete event.
-	CompleteRun(ctx context.Context, namespace, workflow, run string, iter int) error
+	CompleteRun(ctx context.Context, key string) error
+
+	// RestartRun completes the current run iteration and start the next iteration with the provided message.
+	RestartRun(ctx context.Context, key string, message proto.Message) error
 
 	// ListBootstrapEvents returns the boostrap events for the run.
-	ListBootstrapEvents(ctx context.Context, namespace, workflow, run string, iter int) ([]reflex.Event, error)
+	ListBootstrapEvents(ctx context.Context, key string) ([]reflex.Event, error)
 }

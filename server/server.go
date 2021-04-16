@@ -58,13 +58,17 @@ func (s *Server) CompleteRun(ctx context.Context, req *pb.CompleteRequest) (*pb.
 	return swallowErrDup(db.Insert(ctx, s.dbc, req.Key, internal.CompleteRun, nil))
 }
 
-func (s *Server) ListBootstrapEvents(ctx context.Context, req *pb.ListBootstrapRequest) (*pb.Events, error) {
-	key, err := internal.DecodeKey(req.Key)
+func (s *Server) RestartRun(ctx context.Context, req *pb.RunRequest) (*pb.Empty, error) {
+	b, err := internal.Marshal(req.Message)
 	if err != nil {
 		return nil, err
 	}
 
-	el, err := db.ListBootstrapEvents(ctx, s.dbc, key.Namespace, key.Workflow, key.Run, key.Iteration)
+	return new(pb.Empty), db.RestartRun(ctx, s.dbc, req.Key, b)
+}
+
+func (s *Server) ListBootstrapEvents(ctx context.Context, req *pb.ListBootstrapRequest) (*pb.Events, error) {
+	el, err := db.ListBootstrapEvents(ctx, s.dbc, req.Key)
 	if err != nil {
 		return nil, err
 	}

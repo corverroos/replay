@@ -295,7 +295,7 @@ func (r *runner) StartRun(ctx context.Context, e *reflex.Event, key internal.Key
 		r.run(ctx, e, key.Run, key.Iteration, message, s)
 
 		ensure(ctx, func() error {
-			return r.cl.CompleteRun(ctx, r.namespace, r.workflow, key.Run, key.Iteration)
+			return r.cl.CompleteRun(ctx, internal.MinKey(r.namespace, r.workflow, key.Run, key.Iteration))
 		})
 
 		r.metrics.IncComplete(time.Since(e.Timestamp))
@@ -307,7 +307,7 @@ func (r *runner) StartRun(ctx context.Context, e *reflex.Event, key internal.Key
 // bootstrapRun bootstraps a previously started run by replaying all previous events. It returns
 // true if the run is still active after bootstrapping.
 func (r *runner) bootstrapRun(ctx context.Context, run string, iter int, upTo int64) (bool, error) {
-	el, err := r.cl.ListBootstrapEvents(ctx, r.namespace, r.workflow, run, iter)
+	el, err := r.cl.ListBootstrapEvents(ctx, internal.MinKey(r.namespace, r.workflow, run, iter))
 	if err != nil {
 		return false, errors.Wrap(err, "list responses")
 	}
@@ -461,11 +461,9 @@ type RunContext struct {
 func (c *RunContext) Restart(message proto.Message) {
 	// TODO(corver): Maybe add option to drain signals.
 	ensure(c, func() error {
-		return c.cl.RunWorkflowInternal(c, internal.MinKey(c.namespace, c.workflow, c.run, c.iter+1), message)
+		return c.cl.RestartRun(c, internal.MinKey(c.namespace, c.workflow, c.run, c.iter), message)
 	})
-	ensure(c, func() error {
-		return c.cl.CompleteRun(c, c.namespace, c.workflow, c.run, c.iter)
-	})
+
 	panic(restart)
 }
 

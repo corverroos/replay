@@ -12,6 +12,7 @@ service Replay {
   rpc RequestActivity(ActivityMessage) returns (Empty) {}
   rpc RespondActivity(ActivityMessage) returns (Empty) {}
   rpc CompleteRun(CompleteRequest) returns (Empty) {}
+  rpc RestartRun(RunRequest) returns (Empty) {}
   rpc ListBootstrapEvents(ListBootstrapRequest) returns (Events) {}
   rpc Stream(StreamRequest) returns (stream reflexpb.Event) {}
 }

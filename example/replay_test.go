@@ -39,7 +39,7 @@ func TestNoopWorkflow(t *testing.T) {
 		run := fmt.Sprint(i)
 		err := cl.RunWorkflow(ctx, "ns", name, run, new(Empty))
 		jtest.RequireNil(t, err)
-		require.Equal(t, run, <-completeChan)
+		require.Equal(t, internal.MinKey("ns", name, run, 0), <-completeChan)
 	}
 }
 
@@ -50,10 +50,11 @@ func TestRestart(t *testing.T) {
 	cstore := new(test.MemCursorStore)
 
 	name := "restart"
-	restart := func(ctx replay.RunContext, msg *Empty) {
+	restart := func(ctx replay.RunContext, msg *Int) {
 		// Note this just tests restart.
 		key, _ := internal.DecodeKey(ctx.CreateEvent().ForeignID)
-		if key.Iteration < 5 {
+		if key.Iteration < 5 && msg.Value == int64(key.Iteration) {
+			msg.Value++
 			ctx.Restart(msg)
 		}
 	}
@@ -66,17 +67,18 @@ func TestRestart(t *testing.T) {
 	}
 	replay.RegisterWorkflow(testCtx(t), tcl, cstore, "ns", restart, replay.WithName(name))
 
-	err := cl.RunWorkflow(ctx, "ns", name, t.Name(), new(Empty))
+	err := cl.RunWorkflow(ctx, "ns", name, t.Name(), new(Int))
 	jtest.RequireNil(t, err)
 
+	require.Equal(t, internal.MinKey("ns", name, t.Name(), 5), <-completeChan) // Restarts doesn't call Complete on client, only last exit does.
+
 	for i := 0; i < 5; i++ {
-		require.Equal(t, t.Name(), <-completeChan)
-		el, err := cl.Internal().ListBootstrapEvents(ctx, "ns", name, t.Name(), i)
+		el, err := cl.Internal().ListBootstrapEvents(ctx, internal.MinKey("ns", name, t.Name(), i))
 		jtest.RequireNil(t, err)
 		require.Len(t, el, 2)
 	}
 
-	el, err := cl.Internal().ListBootstrapEvents(ctx, "ns", name, t.Name(), 6)
+	el, err := cl.Internal().ListBootstrapEvents(ctx, internal.MinKey("ns", name, t.Name(), 6))
 	jtest.RequireNil(t, err)
 	require.Len(t, el, 0)
 }
@@ -157,7 +159,7 @@ func TestActivityErr(t *testing.T) {
 
 	err := cl.RunWorkflow(ctx, "ns", name, t.Name(), new(Empty))
 	jtest.RequireNil(t, err)
-	require.Equal(t, t.Name(), <-completeChan)
+	require.Equal(t, internal.MinKey("ns", name, t.Name(), 0), <-completeChan)
 	require.Equal(t, 2, i)
 }
 
@@ -187,9 +189,9 @@ func TestIdenticalReplay(t *testing.T) {
 	jtest.RequireNil(t, err)
 
 	activity := <-errsChan
-	require.Equal(t, activity, "PrintGreeting")
+	require.Equal(t, "PrintGreeting", activity)
 
-	el, err := cl.Internal().ListBootstrapEvents(ctx, "ns", name, t.Name(), 0)
+	el, err := cl.Internal().ListBootstrapEvents(ctx, internal.MinKey("ns", name, t.Name(), 0))
 	jtest.RequireNil(t, err)
 	require.Len(t, el, 6)
 
@@ -201,9 +203,9 @@ func TestIdenticalReplay(t *testing.T) {
 	}
 	replay.RegisterWorkflow(testCtx(t), tcl2, cstore, "ns", workflow, replay.WithName(name)) // This workflow will bootstrap and continue after ctx.ExecActivity(PrintGreeting, name)
 	run := <-completeChan
-	require.Equal(t, t.Name(), run)
+	require.Equal(t, internal.MinKey("ns", name, t.Name(), 0), run)
 
-	el, err = cl.Internal().ListBootstrapEvents(ctx, "ns", name, run, 0)
+	el, err = cl.Internal().ListBootstrapEvents(ctx, internal.MinKey("ns", name, t.Name(), 0))
 	jtest.RequireNil(t, err)
 	require.Len(t, el, 8)
 }
@@ -248,21 +250,21 @@ func TestEarlyCompleteReplay(t *testing.T) {
 	cancel()
 
 	// Ensure only 1 event, CreateRun
-	el, err := cl.Internal().ListBootstrapEvents(context.Background(), "ns", name, t.Name(), 0)
+	el, err := cl.Internal().ListBootstrapEvents(context.Background(), internal.MinKey("ns", name, t.Name(), 0))
 	jtest.RequireNil(t, err)
 	require.Len(t, el, 1)
 
 	// This workflow will replay the above run and just complete it immediately.
 	noop := func(ctx replay.RunContext, e *Empty) {}
 	replay.RegisterWorkflow(testCtx(t), tcl, new(test.MemCursorStore), "ns", noop, replay.WithName(name))
-	require.Equal(t, t.Name(), <-completeChan)
+	require.Equal(t, internal.MinKey("ns", name, t.Name(), 0), <-completeChan)
 
 	// Trigger above activity response (after new completion)
 	returnCh <- struct{}{}
 
 	// Wait for 3 events: CreateRun, Complete, Response
 	require.Eventually(t, func() bool {
-		el, err = cl.Internal().ListBootstrapEvents(context.Background(), "ns", name, t.Name(), 0)
+		el, err = cl.Internal().ListBootstrapEvents(context.Background(), internal.MinKey("ns", name, t.Name(), 0))
 		jtest.RequireNil(t, err)
 		if len(el) < 3 {
 			return false
@@ -277,9 +279,9 @@ func TestEarlyCompleteReplay(t *testing.T) {
 	// Do another noop run, ensure it completes even though above had response after the complete.
 	err = cl.RunWorkflow(context.Background(), "ns", name, "flush", new(Empty))
 	jtest.RequireNil(t, err)
-	require.Equal(t, "flush", <-completeChan)
+	require.Equal(t, internal.MinKey("ns", name, "flush", 0), <-completeChan)
 
-	el, err = cl.Internal().ListBootstrapEvents(context.Background(), "ns", name, "flush", 0)
+	el, err = cl.Internal().ListBootstrapEvents(context.Background(), internal.MinKey("ns", name, "flush", 0))
 	jtest.RequireNil(t, err)
 	require.Len(t, el, 2)
 }
@@ -323,9 +325,9 @@ func TestBootstrapComplete(t *testing.T) {
 	// This workflow will complete during bootstrap
 	replay.RegisterWorkflow(testCtx(t), tcl2, cstore, "ns", noop, replay.WithName(name))
 	run := <-completeChan
-	require.Equal(t, t.Name(), run)
+	require.Equal(t, internal.MinKey("ns", name, t.Name(), 0), run)
 
-	el, err := cl.Internal().ListBootstrapEvents(ctx, "ns", name, run, 0)
+	el, err := cl.Internal().ListBootstrapEvents(ctx, internal.MinKey("ns", name, t.Name(), 0))
 	jtest.RequireNil(t, err)
 	require.Len(t, el, 7) // No PrintGreeting response
 	require.True(t, reflex.IsType(el[0].Type, internal.CreateRun))
@@ -384,7 +386,7 @@ func TestOutOfOrderResponses(t *testing.T) {
 		}))
 	<-errChan
 
-	el, err := cl.Internal().ListBootstrapEvents(ctx, "ns", name, t.Name(), 0)
+	el, err := cl.Internal().ListBootstrapEvents(ctx, internal.MinKey("ns", name, t.Name(), 0))
 	jtest.RequireNil(t, err)
 	require.Len(t, el, 6)
 	require.True(t, reflex.IsType(el[0].Type, internal.CreateRun))

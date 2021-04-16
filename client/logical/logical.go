@@ -23,15 +23,12 @@ type Client struct {
 }
 
 func (c *Client) RunWorkflow(ctx context.Context, namespace, workflow, run string, message proto.Message) error {
-	key := internal.MinKey(namespace, workflow, run, 0)
-	return c.RunWorkflowInternal(ctx, key, message)
-}
-
-func (c *Client) RunWorkflowInternal(ctx context.Context, key string, message proto.Message) error {
 	b, err := toBytes(message)
 	if err != nil {
 		return err
 	}
+
+	key := internal.MinKey(namespace, workflow, run, 0)
 
 	return db.Insert(ctx, c.dbc, key, internal.CreateRun, b)
 }
@@ -72,12 +69,21 @@ func (c *Client) RespondActivityRaw(ctx context.Context, key string, message *an
 	return swallowErrDup(db.Insert(ctx, c.dbc, key, internal.ActivityResponse, b))
 }
 
-func (c *Client) CompleteRun(ctx context.Context, namespace, workflow, run string, iter int) error {
-	return swallowErrDup(db.Insert(ctx, c.dbc, internal.MinKey(namespace, workflow, run, iter), internal.CompleteRun, nil))
+func (c *Client) CompleteRun(ctx context.Context, key string) error {
+	return swallowErrDup(db.Insert(ctx, c.dbc, key, internal.CompleteRun, nil))
 }
 
-func (c *Client) ListBootstrapEvents(ctx context.Context, namespace, workflow, run string, iter int) ([]reflex.Event, error) {
-	return db.ListBootstrapEvents(ctx, c.dbc, namespace, workflow, run, iter)
+func (c *Client) RestartRun(ctx context.Context, key string, message proto.Message) error {
+	b, err := toBytes(message)
+	if err != nil {
+		return err
+	}
+
+	return db.RestartRun(ctx, c.dbc, key, b)
+}
+
+func (c *Client) ListBootstrapEvents(ctx context.Context, key string) ([]reflex.Event, error) {
+	return db.ListBootstrapEvents(ctx, c.dbc, key)
 }
 
 func (c *Client) Stream(namespace string) reflex.StreamFunc {
