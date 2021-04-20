@@ -25,6 +25,37 @@ See [TestExample](./example/example_test.go) for an overview of the replay API.
 - Multiple signals of the same type can be sent to the same run.
 - The workflow must check for signals, there is no guarantee that a workflow will consume all signals.
 
-## TODO
+## Safety
 
-- Add type check test.
+The `replay.Client` and `replay.RunContext` APIs are not type safe. It up to the user of the replay framework
+to ensure that proto messages (input and output) passed to and returned from activities, signals and runs 
+match those defined in the actual code. 
+
+The names of workflows, activities and signals must also match and may not change while runs are active. 
+So renaming functions is not possible once used in production, except if explicit name overrides are used 
+via `replay.WithName`.
+
+The `replaygen` code generation tool is provided as a way to mitigate the above risks. It is an opinionated
+code generation wrapper of the replay API. 
+
+A `replaygen.Namespace` structure is defined in code and includes all workflows, signals and activities names and types.
+The `replaygen` command is then run by the `//go:generate replaygen` directive in the same file.
+
+A `replay_gen.go` file will then be generated that provides a type-safe API for that namespace and workflows.
+A type-safe workflow can then be implemented using the `{workflow}Flow` interface. Type-safe run and 
+signals functions are also generated.
+
+`replaygen` also provides the following benefits:
+- decoupling names stored in the DB from function names making renaming function safe.
+- all types and names explicit so that breaking changes to them are easier to detect and block. 
+- unit testing workflow functions can be done using standard interface mocking.
+
+See these test file for examples: 
+ - User code: [replay.go](./replaygen/internal/testdata/replay.go)
+ - Generated code: [replay_gen.go](./replaygen/internal/testdata/replay_gen.go)
+
+Build to replaygen tool with:
+```
+go install github.com/corverroos/replay/replaygen/cmd/replaygen
+```
+

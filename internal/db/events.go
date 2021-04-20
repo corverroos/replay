@@ -85,7 +85,7 @@ func RestartRun(ctx context.Context, dbc *sql.DB, key string, message []byte) er
 	defer tx.Rollback()
 
 	// Mark previous iteration as complete
-	notify1, err := insertTX(ctx, tx, key, internal.CompleteRun, nil)
+	notify1, err := insertTx(ctx, tx, key, internal.CompleteRun, nil)
 	if errors.Is(err, replay.ErrDuplicate) {
 		// NoReturnErr: Continue below
 	} else if err != nil {
@@ -96,7 +96,7 @@ func RestartRun(ctx context.Context, dbc *sql.DB, key string, message []byte) er
 
 	// Start next iteration.
 	k.Iteration++
-	notify2, err := insertTX(ctx, tx, k.Encode(), internal.CreateRun, message)
+	notify2, err := insertTx(ctx, tx, k.Encode(), internal.CreateRun, message)
 	if errors.Is(err, replay.ErrDuplicate) {
 		// NoReturnErr: Continue below
 	} else if err != nil {
@@ -148,7 +148,7 @@ func Insert(ctx context.Context, dbc *sql.DB, key string, typ internal.EventType
 	}
 	defer tx.Rollback()
 
-	notify, err := insertTX(ctx, tx, key, typ, message)
+	notify, err := insertTx(ctx, tx, key, typ, message)
 	if err != nil {
 		return err
 	}
@@ -157,7 +157,7 @@ func Insert(ctx context.Context, dbc *sql.DB, key string, typ internal.EventType
 	return tx.Commit()
 }
 
-func insertTX(ctx context.Context, tx *sql.Tx, key string, typ internal.EventType, message []byte) (rsql.NotifyFunc, error) {
+func insertTx(ctx context.Context, tx *sql.Tx, key string, typ internal.EventType, message []byte) (rsql.NotifyFunc, error) {
 	// Do lookup to avoid creating tons of gaps when replaying long running runs.
 	var exists int
 	err := tx.QueryRowContext(ctx, "select exists("+

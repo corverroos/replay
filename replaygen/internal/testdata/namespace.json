@@ -1,0 +1,72 @@
+{
+  "PackageName": "testdata",
+  "Name": "example",
+  "Workflows": [
+    {
+      "Name": "foo",
+      "Description": "This is an example foo workflow",
+      "Input": {
+        "Package": "",
+        "Name": "String"
+      },
+      "Signals": [
+        {
+          "Name": "s1",
+          "Description": "Doesn't actually do anything",
+          "Enum": 1,
+          "Message": {
+            "Package": "",
+            "Name": "Empty"
+          }
+        },
+        {
+          "Name": "s2",
+          "Description": "Notifies that something has happened",
+          "Enum": 2,
+          "Message": {
+            "Package": "",
+            "Name": "Int"
+          }
+        }
+      ]
+    },
+    {
+      "Name": "bar",
+      "Description": "Bar is bar",
+      "Input": {
+        "Package": "",
+        "Name": "Empty"
+      },
+      "Signals": null
+    }
+  ],
+  "Activities": [
+    {
+      "Name": "a",
+      "Description": "Processes stuff",
+      "FuncName": "ActivityA",
+      "Input": {
+        "Package": "",
+        "Name": "Empty"
+      },
+      "Output": {
+        "Package": "",
+        "Name": "String"
+      }
+    },
+    {
+      "Name": "b",
+      "Description": "Notifies stuff",
+      "FuncName": "ActivityB",
+      "Input": {
+        "Package": "",
+        "Name": "String"
+      },
+      "Output": {
+        "Package": "",
+        "Name": "Empty"
+      }
+    }
+  ],
+  "Imports": null
+}

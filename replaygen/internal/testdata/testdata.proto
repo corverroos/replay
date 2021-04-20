@@ -1,0 +1,12 @@
+syntax = "proto3";
+
+package testdata;
+
+message Empty{}
+
+message String{
+  string value = 1;
+}
+message Int{
+  int64 value = 1;
+}
