@@ -13,7 +13,7 @@
         {
           "Name": "s1",
           "Description": "Doesn't actually do anything",
-          "Type": 1,
+          "Enum": 1,
           "Message": {
             "Package": "",
             "Name": "Empty"
@@ -22,7 +22,7 @@
         {
           "Name": "s2",
           "Description": "Notifies that something has happened",
-          "Type": 2,
+          "Enum": 2,
           "Message": {
             "Package": "",
             "Name": "Int"

@@ -193,7 +193,7 @@ func parseSignal(fset *token.FileSet, ex ast.Expr) (Signal, error) {
 				return Signal{}, errors.Wrap(err, "signal name", opt)
 			}
 		case "Enum":
-			res.Type, err = parseInt(kv.Value)
+			res.Enum, err = parseInt(kv.Value)
 			if err != nil {
 				return Signal{}, errors.Wrap(err, "signal enum", opt)
 			}

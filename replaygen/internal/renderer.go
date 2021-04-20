@@ -73,7 +73,15 @@ func Validate(ns Namespace) error {
 		descs = append(descs, name{Label: "workflow " + w.Name, Value: w.Description})
 		types = append(types, typ{Label: "workflow " + w.Name + " input", Value: w.Input})
 
+		uniq := make(map[int]struct{})
 		for _, s := range w.Signals {
+			if _, ok := uniq[s.Enum]; ok {
+				return errors.New("duplicate signal enum", j.MKV{"signal": s.Name, "enum": s.Enum})
+			} else if s.Enum == 0 {
+				return errors.New("non-positive signal enum", j.MKV{"signal": s.Name, "enum": s.Enum})
+			}
+			uniq[s.Enum] = struct{}{}
+
 			names = append(names, name{Label: "signal", Value: s.Name})
 			descs = append(descs, name{Label: "signal " + s.Name, Value: s.Description})
 			types = append(types, typ{Label: "signal " + s.Name + " message", Value: s.Message})
@@ -85,27 +93,37 @@ func Validate(ns Namespace) error {
 		descs = append(descs, name{Label: "activity " + a.Name, Value: a.Description})
 		types = append(types, typ{Label: "activity " + a.Name + " input", Value: a.Input})
 		types = append(types, typ{Label: "activity " + a.Name + " output", Value: a.Output})
+		if a.FuncName == "" {
+			return errors.New("activity function empty", j.MKS{"activity": a.Name})
+		}
+		// TODO(corver): Validate activity function
+		// TODO(corver): Ensure all activity backends are compatible
 	}
 
+	uniq := make(map[string]struct{})
 	for _, n := range names {
 		if n.Value == "" {
-			return errors.New("Name empty", j.MKS{"label": n.Label})
+			return errors.New("name empty", j.MKS{"label": n.Label})
+		} else if _, ok := uniq[n.Value]; ok {
+			return errors.New("duplicate name", j.MKV{"name": n.Value})
 		}
+		uniq[n.Value] = struct{}{}
+
 		snake := toSnake(n.Value)
 		if snake != n.Value {
-			return errors.New("Name not snake case", j.MKS{"label": n.Label, "suggest": snake})
+			return errors.New("name not snake case", j.MKS{"label": n.Label, "suggest": snake})
 		}
 	}
 
 	for _, d := range descs {
 		if d.Value == "" {
-			return errors.New("Description empty", j.MKS{"label": d.Label})
+			return errors.New("description empty", j.MKS{"label": d.Label})
 		}
 	}
 
 	for _, t := range types {
 		if t.Value.String() == "" {
-			return errors.New("Type empty", j.MKS{"label": t.Label})
+			return errors.New("Enum empty", j.MKS{"label": t.Label})
 		}
 	}
 

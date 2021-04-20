@@ -30,7 +30,7 @@ type Activity struct {
 type Signal struct {
 	Name        string
 	Description string
-	Type        int
+	Enum        int
 	Message     PBType
 }
 
