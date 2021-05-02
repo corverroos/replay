@@ -7,27 +7,25 @@ import (
 	"testing"
 	"time"
 
-	"github.com/corverroos/replay"
-	"github.com/corverroos/replay/client"
-	pb "github.com/corverroos/replay/internal/replaypb"
-	"github.com/corverroos/replay/server"
-	"github.com/luno/jettison/interceptors"
 	"github.com/luno/jettison/jtest"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/connectivity"
+
+	"github.com/corverroos/replay"
+	"github.com/corverroos/replay/client"
+	pb "github.com/corverroos/replay/internal/replaypb"
+	"github.com/corverroos/replay/server"
 )
 
-// SetupForTesting starts a replay grpc server and returns a connected client.
-func SetupForTesting(t *testing.T) (replay.Client, *sql.DB) {
-	dbc := ConnectDB(t)
-	srv, addr := NewServer(t, dbc)
+// SetupGRPC starts a replay grpc server and returns a connected client.
+func SetupGRPC(t *testing.T) (replay.Client, *sql.DB) {
+	scl, dbc := Setup(t)
+	srv, addr := newServer(t, scl)
 
 	t.Cleanup(srv.Stop)
 
-	conn, err := grpc.Dial(addr, grpc.WithInsecure(),
-		grpc.WithUnaryInterceptor(interceptors.UnaryClientInterceptor),
-		grpc.WithStreamInterceptor(interceptors.StreamClientInterceptor))
+	conn, err := grpc.Dial(addr, grpc.WithInsecure())
 	jtest.RequireNil(t, err)
 
 	t.Cleanup(func() {
@@ -53,16 +51,14 @@ func SetupForTesting(t *testing.T) (replay.Client, *sql.DB) {
 	return cl, dbc
 }
 
-// NewServer starts and returns a goku grpc server and its address.
-func NewServer(t *testing.T, dbc *sql.DB) (*server.Server, string) {
+// newServer starts and returns a replay grpc server and its address.
+func newServer(t *testing.T, cl *server.DBClient) (*server.Server, string) {
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	jtest.RequireNil(t, err)
 
-	grpcServer := grpc.NewServer(
-		grpc.UnaryInterceptor(interceptors.UnaryServerInterceptor),
-		grpc.StreamInterceptor(interceptors.StreamServerInterceptor))
+	grpcServer := grpc.NewServer()
 
-	srv := server.New(dbc)
+	srv := server.New(cl)
 
 	pb.RegisterReplayServer(grpcServer, srv)
 

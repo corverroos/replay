@@ -5,12 +5,9 @@ import (
 	"database/sql"
 	"encoding/binary"
 	"hash/fnv"
+	"path"
 	"time"
 
-	"github.com/corverroos/replay"
-	"github.com/corverroos/replay/internal"
-	"github.com/corverroos/replay/internal/db"
-	"github.com/corverroos/replay/internal/replaypb"
 	"github.com/golang/protobuf/proto"
 	"github.com/golang/protobuf/ptypes/any"
 	"github.com/luno/fate"
@@ -18,9 +15,20 @@ import (
 	"github.com/luno/jettison/log"
 	"github.com/luno/reflex"
 	"github.com/luno/reflex/rpatterns"
+
+	"github.com/corverroos/replay/internal"
+	"github.com/corverroos/replay/internal/db"
+	"github.com/corverroos/replay/internal/replaypb"
 )
 
-//go:generate protoc --go_out=plugins=grpc:. ./sleep.proto
+// replayClient is implemented by server.Client.
+type replayClient interface {
+	// Stream returns a replay events stream function for the namespace.
+	Stream(namespace string) reflex.StreamFunc
+
+	// RespondActivityServer inserts a ActivityResponse event without wrapping it in an any.
+	RespondActivityServer(ctx context.Context, key string, message *any.Any) error
+}
 
 type await struct {
 	ID        int64
@@ -37,7 +45,7 @@ const (
 	AwaitSuccess AwaitStatus = 3
 )
 
-func RegisterForTesting(ctx context.Context, cl replay.Client, cstore reflex.CursorStore, dbc *sql.DB) {
+func RegisterForTesting(ctx context.Context, cl replayClient, cstore reflex.CursorStore, dbc *sql.DB) {
 	pollPeriod = time.Millisecond * 100
 	shouldComplete = func(completeAt time.Time) bool {
 		return true
@@ -45,7 +53,7 @@ func RegisterForTesting(ctx context.Context, cl replay.Client, cstore reflex.Cur
 	Register(func() context.Context { return ctx }, cl, cstore, dbc)
 }
 
-func Register(getCtx func() context.Context, cl replay.Client, cstore reflex.CursorStore, dbc *sql.DB) {
+func Register(getCtx func() context.Context, cl replayClient, cstore reflex.CursorStore, dbc *sql.DB) {
 	fn := func(ctx context.Context, f fate.Fate, e *reflex.Event) error {
 		if !reflex.IsType(e.Type, internal.ActivityRequest) {
 			return nil
@@ -79,9 +87,10 @@ func Register(getCtx func() context.Context, cl replay.Client, cstore reflex.Cur
 		return nil
 	}
 
-	spec := reflex.NewSpec(cl.Stream("*"), cstore, reflex.NewConsumer(internal.ActivitySignal, fn))
+	consumer := path.Join("replay_activity", "internal", internal.ActivitySignal)
+	spec := reflex.NewSpec(cl.Stream("*"), cstore, reflex.NewConsumer(consumer, fn))
 	go rpatterns.RunForever(getCtx, spec)
-	go completeAwaitsForever(getCtx, cl.Internal(), dbc)
+	go completeAwaitsForever(getCtx, cl, dbc)
 }
 
 func Insert(ctx context.Context, dbc *sql.DB, namespace, workflow, run string, signalType int, message *any.Any, externalID string) error {
@@ -110,7 +119,7 @@ func Insert(ctx context.Context, dbc *sql.DB, namespace, workflow, run string, s
 	return nil
 }
 
-func completeAwaitsForever(getCtx func() context.Context, cl internal.Client, dbc *sql.DB) {
+func completeAwaitsForever(getCtx func() context.Context, cl replayClient, dbc *sql.DB) {
 	for {
 		ctx := getCtx()
 
@@ -122,7 +131,7 @@ func completeAwaitsForever(getCtx func() context.Context, cl internal.Client, db
 	}
 }
 
-func completeAwaitsOnce(ctx context.Context, cl internal.Client, dbc *sql.DB) error {
+func completeAwaitsOnce(ctx context.Context, cl replayClient, dbc *sql.DB) error {
 	// TODO(corver): Do two queries, one to fail, one to complete.
 	awaits, err := listPending(ctx, dbc)
 	if err != nil {
@@ -151,7 +160,7 @@ func completeAwaitsOnce(ctx context.Context, cl internal.Client, dbc *sql.DB) er
 			}
 		}
 
-		err = cl.RespondActivityRaw(ctx, a.Key, &any)
+		err = cl.RespondActivityServer(ctx, a.Key, &any)
 		if err != nil {
 			return err
 		}
@@ -167,7 +176,12 @@ func completeAwaitsOnce(ctx context.Context, cl internal.Client, dbc *sql.DB) er
 			return nil
 		}
 
-		err := cl.RespondActivity(ctx, c.Key, &replaypb.SleepDone{})
+		apb, err := internal.ToAny(&replaypb.SleepDone{})
+		if err != nil {
+			return err
+		}
+
+		err = cl.RespondActivityServer(ctx, c.Key, apb)
 		if err != nil {
 			return err
 		}

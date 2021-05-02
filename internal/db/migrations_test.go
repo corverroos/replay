@@ -2,8 +2,9 @@ package db
 
 import (
 	"flag"
-	"github.com/corverroos/truss"
 	"testing"
+
+	"github.com/corverroos/truss"
 )
 
 var update = flag.Bool("update", false, "update schema file")

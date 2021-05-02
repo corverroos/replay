@@ -3,9 +3,12 @@ package replay
 import "time"
 
 type options struct {
+	shardM, shardN  int
+	shardFunc       func(n int, run string) (m int)
 	nameFunc        func(fn interface{}) string
 	workflowMetrics func(namespace, workflow string) Metrics
 	activityMetrics func(namespace, activity string) Metrics
+	awaitTimeout    time.Duration
 }
 
 type option func(*options)
@@ -20,8 +23,53 @@ func WithName(name string) option {
 	}
 }
 
+// WithShard returns an option to only consume a subset of all runs (a shard).
+// The subset is defined by runs consistently hashing onto the mth of n shards.
+//
+// Note that all m-of-n shards must be registered independently and that n should
+// not be changed since the cursors are tied to it. However since replay is
+// deterministic and idempotent, resetting the consumer cursors by changing n
+// should only result in an initial delay (and load spike) as the newly sharded
+// consumers reprocess all runs and activities.
+//
+// Note that each activity and each workflow can be sharded separately.
+//
+// Sharding is disabled by default, which is similar to 1-of-1 sharding.
+// See also WithShardFunc.
+func WithShard(m, n int) option {
+	return func(o *options) {
+		o.shardM = m
+		o.shardN = n
+	}
+}
+
+// WithShardFunc returns an option to override the default shard function
+// which uses Google's Jump Consistent Hash with the fnv64a hash of the run as its key.
+//
+// Note that sharding needs to be enabled via WithShard.
+// Note also that all m-of-n shards need to use the same deterministic shard function.
+func WithShardFunc(fn func(n int, run string) (m int)) option {
+	return func(o *options) {
+		o.shardFunc = fn
+	}
+}
+
+// WithAwaitTimeout returns an option to override the default run goroutine
+// await activity response timeout of 1 hour.
+//
+// This timeout ensures there isn't an buildup of run goroutines
+// for long sleeps.
+//
+// This function only applies to RegisterWorkflow.
+func WithAwaitTimeout(d time.Duration) option {
+	return func(o *options) {
+		o.awaitTimeout = d
+	}
+}
+
 // WithWorkflowMetrics returns an option to define workflow metrics.
 // It overrides the default prometheus metrics.
+//
 // This function only applies to RegisterWorkflow.
 func WithWorkflowMetrics(m func(namespace, workflow string) Metrics) option {
 	return func(o *options) {
@@ -46,7 +94,9 @@ type Metrics struct {
 
 func defaultOptions() options {
 	return options{
-		nameFunc: getFunctionName,
+		shardFunc:    defaultShardFunc,
+		nameFunc:     getFunctionName,
+		awaitTimeout: time.Hour,
 		workflowMetrics: func(namespace, workflow string) Metrics {
 			return Metrics{
 				IncErrors: workflowErrors.WithLabelValues(namespace, workflow).Inc,

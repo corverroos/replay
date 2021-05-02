@@ -6,15 +6,15 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/corverroos/replay"
 	"github.com/corverroos/truss"
 	"github.com/go-sql-driver/mysql"
 	"github.com/luno/jettison/errors"
 	"github.com/luno/jettison/j"
+
+	"github.com/corverroos/replay/internal"
 )
 
 func ConnectForTesting(t *testing.T) *sql.DB {
-	CleanCache(t)
 	return truss.ConnectForTesting(t, migrations...)
 }
 
@@ -48,5 +48,5 @@ func MaybeWrapErrDuplicate(err error, key string) (error, bool) {
 		return err, false
 	}
 
-	return errors.Wrap(replay.ErrDuplicate, "duplicate for key", j.KS("key", key)), true
+	return errors.Wrap(internal.ErrDuplicate, "duplicate for key", j.KS("key", key)), true
 }

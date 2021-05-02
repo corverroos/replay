@@ -77,7 +77,7 @@ func Validate(ns Namespace) error {
 		for _, s := range w.Signals {
 			if _, ok := uniq[s.Enum]; ok {
 				return errors.New("duplicate signal enum", j.MKV{"signal": s.Name, "enum": s.Enum})
-			} else if s.Enum == 0 {
+			} else if s.Enum <= 0 {
 				return errors.New("non-positive signal enum", j.MKV{"signal": s.Name, "enum": s.Enum})
 			}
 			uniq[s.Enum] = struct{}{}
@@ -123,7 +123,7 @@ func Validate(ns Namespace) error {
 
 	for _, t := range types {
 		if t.Value.String() == "" {
-			return errors.New("Enum empty", j.MKS{"label": t.Label})
+			return errors.New("type empty", j.MKS{"label": t.Label})
 		}
 	}
 

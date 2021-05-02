@@ -1,16 +1,20 @@
+// Package client provides a grpc client for the replay grpc server. The client implements replay.Client
+// that can by used by the user to run workflows and signal runs. It also provides an internal.Client that
+// is used by the replay sdk to execute workflows and activities.
 package client
 
 import (
 	"context"
 
-	"github.com/corverroos/replay"
-	"github.com/corverroos/replay/internal"
-	pb "github.com/corverroos/replay/internal/replaypb"
 	"github.com/golang/protobuf/proto"
-	"github.com/golang/protobuf/ptypes/any"
+	"github.com/luno/jettison/errors"
 	"github.com/luno/reflex"
 	"github.com/luno/reflex/reflexpb"
 	"google.golang.org/grpc"
+
+	"github.com/corverroos/replay"
+	"github.com/corverroos/replay/internal"
+	pb "github.com/corverroos/replay/internal/replaypb"
 )
 
 func New(cc *grpc.ClientConn) replay.Client {
@@ -21,23 +25,30 @@ type Client struct {
 	clpb pb.ReplayClient
 }
 
-func (c *Client) RunWorkflow(ctx context.Context, namespace, workflow, run string, message proto.Message) error {
+func (c *Client) RunWorkflow(ctx context.Context, namespace, workflow, run string, message proto.Message) (bool, error) {
 	anyMsg, err := internal.ToAny(message)
 	if err != nil {
-		return err
+		return false, err
 	}
 
 	_, err = c.clpb.RunWorkflow(ctx, &pb.RunRequest{
 		Key:     internal.MinKey(namespace, workflow, run, 0),
 		Message: anyMsg,
 	})
-	return err
+	if errors.Is(err, internal.ErrDuplicate) {
+		// NoReturnErr: Return false if duplicate call.
+		return false, nil
+	} else if err != nil {
+		return false, err
+	}
+
+	return true, nil
 }
 
-func (c *Client) SignalRun(ctx context.Context, namespace, workflow, run string, s replay.Signal, message proto.Message, extID string) error {
+func (c *Client) SignalRun(ctx context.Context, namespace, workflow, run string, s replay.Signal, message proto.Message, extID string) (bool, error) {
 	anyMsg, err := internal.ToAny(message)
 	if err != nil {
-		return err
+		return false, err
 	}
 
 	_, err = c.clpb.SignalRun(ctx, &pb.SignalRequest{
@@ -48,7 +59,14 @@ func (c *Client) SignalRun(ctx context.Context, namespace, workflow, run string,
 		SignalType: int32(s.SignalType()),
 		ExternalId: extID,
 	})
-	return err
+	if errors.Is(err, internal.ErrDuplicate) {
+		// NoReturnErr: Return false if duplicate call.
+		return false, nil
+	} else if err != nil {
+		return false, err
+	}
+
+	return true, nil
 }
 
 func (c *Client) RequestActivity(ctx context.Context, key string, message proto.Message) error {
@@ -64,21 +82,17 @@ func (c *Client) RequestActivity(ctx context.Context, key string, message proto.
 	return err
 }
 
-func (c *Client) RespondActivityRaw(ctx context.Context, key string, message *any.Any) error {
-	_, err := c.clpb.RespondActivity(ctx, &pb.ActivityMessage{
-		Key:     key,
-		Message: message,
-	})
-	return err
-}
-
 func (c *Client) RespondActivity(ctx context.Context, key string, message proto.Message) error {
 	anyMsg, err := internal.ToAny(message)
 	if err != nil {
 		return err
 	}
 
-	return c.RespondActivityRaw(ctx, key, anyMsg)
+	_, err = c.clpb.RespondActivity(ctx, &pb.ActivityMessage{
+		Key:     key,
+		Message: anyMsg,
+	})
+	return err
 }
 
 func (c *Client) CompleteRun(ctx context.Context, key string) error {

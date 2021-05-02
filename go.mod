@@ -4,6 +4,7 @@ go 1.16
 
 require (
 	github.com/corverroos/truss v0.0.0-20210325092544-7695147a5970
+	github.com/dgryski/go-jump v0.0.0-20170409065014-e1f439676b57 // indirect
 	github.com/go-sql-driver/mysql v1.4.1
 	github.com/golang/protobuf v1.3.3
 	github.com/luno/fate v0.0.0-20191017091315-567fa9070f1c

@@ -7,8 +7,8 @@ import "google/protobuf/any.proto";
 import "google/protobuf/duration.proto";
 
 service Replay {
-  rpc RunWorkflow(RunRequest) returns (Empty) {}
-  rpc SignalRun(SignalRequest) returns (Empty) {}
+  rpc RunWorkflow(RunRequest) returns (OK) {}
+  rpc SignalRun(SignalRequest) returns (OK) {}
   rpc RequestActivity(ActivityMessage) returns (Empty) {}
   rpc RespondActivity(ActivityMessage) returns (Empty) {}
   rpc CompleteRun(CompleteRequest) returns (Empty) {}
@@ -17,7 +17,11 @@ service Replay {
   rpc Stream(StreamRequest) returns (stream reflexpb.Event) {}
 }
 
-message Empty {}
+message Empty {} // Empty implies event either inserted or a duplicate already exists.
+
+message OK {
+  bool ok = 1; // Ok implies event inserted, so no duplicates.
+}
 
 message SleepDone{}
 

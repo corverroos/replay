@@ -1,3 +1,5 @@
+// Package internal provides the replay internal types and helper functions. It is used both by the replay server
+// as well as the replay sdk.
 package internal
 
 import (
@@ -11,6 +13,7 @@ import (
 	"github.com/golang/protobuf/ptypes"
 	"github.com/golang/protobuf/ptypes/any"
 	"github.com/luno/jettison/errors"
+	"github.com/luno/jettison/j"
 	"github.com/luno/reflex"
 	"github.com/luno/reflex/reflexpb"
 )
@@ -18,11 +21,16 @@ import (
 const ActivitySleep = "replay_sleep"
 const ActivitySignal = "replay_signal"
 
+// ErrDuplicate indicates a specific action (like RunWorkflow or SignalRun) has already been performed.
+var ErrDuplicate = errors.New("duplicate entry", j.C("ERR_96713b1c52c5d59f"))
+
 type EventType int
 
 func (e EventType) ReflexType() int {
 	return int(e)
 }
+
+//go:generate stringer -type=EventType
 
 const (
 	CreateRun   EventType = 1
@@ -192,9 +200,6 @@ type Client interface {
 
 	// RespondActivity inserts a ActivityResponse event.
 	RespondActivity(ctx context.Context, key string, message proto.Message) error
-
-	// RespondActivityRaw inserts a ActivityResponse event without wrapping the message in an any.
-	RespondActivityRaw(ctx context.Context, key string, message *any.Any) error
 
 	// CompleteRun inserts a RunComplete event.
 	CompleteRun(ctx context.Context, key string) error

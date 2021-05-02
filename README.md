@@ -28,34 +28,89 @@ See [TestExample](./example/example_test.go) for an overview of the replay API.
 ## Safety
 
 The `replay.Client` and `replay.RunContext` APIs are not type safe. It up to the user of the replay framework
-to ensure that proto messages (input and output) passed to and returned from activities, signals and runs 
-match those defined in the actual code. 
+to ensure that protobuf message types (input and output) passed to and returned from activities, signals and runs 
+match those defined in the actual code.
 
 The names of workflows, activities and signals must also match and may not change while runs are active. 
-So renaming functions is not possible once used in production, except if explicit name overrides are used 
+Renaming functions is therefore not allowed once used in production, except if explicit name overrides are used 
 via `replay.WithName`.
 
-The `replaygen` code generation tool is provided as a way to mitigate the above risks. It is an opinionated
-code generation wrapper of the replay API. 
+The `typedreplay` code generation tool is provided as a way to mitigate the above risks. It is an opinionated
+code generation wrapper of the replay framework that generates a strongly typed API based on a structured 
+input definition. 
 
-A `replaygen.Namespace` structure is defined in code and includes all workflows, signals and activities names and types.
-The `replaygen` command is then run by the `//go:generate replaygen` directive in the same file.
+A `typedreplay.Namespace` structure should be defined in code and includes all workflows, signals and activities names and types.
+The `typedreplay` command can be then be run by the `//go:generate typedreplay` directive in the same file.
 
 A `replay_gen.go` file will then be generated that provides a type-safe API for that namespace and workflows.
 A type-safe workflow can then be implemented using the `{workflow}Flow` interface. Type-safe run and 
 signals functions are also generated.
 
-`replaygen` also provides the following benefits:
+`typedreplay` also provides the following benefits:
 - decoupling names stored in the DB from function names making renaming function safe.
-- all types and names explicit so that breaking changes to them are easier to detect and block. 
+- all types and names are explicitly defiend so that breaking changes to them are easier to detect and block. 
 - unit testing workflow functions can be done using standard interface mocking.
 
 See these test file for examples: 
- - User code: [replay.go](./replaygen/internal/testdata/replay.go)
- - Generated code: [replay_gen.go](./replaygen/internal/testdata/replay_gen.go)
+ - User code: [replay.go](./typedreplay/internal/testdata/replay.go)
+ - Generated code: [replay_gen.go](./typedreplay/internal/testdata/replay_gen.go)
 
-Build to replaygen tool with:
+Build to typedreplay tool with:
 ```
 go install github.com/corverroos/replay/replaygen/cmd/replaygen
 ```
 
+## Under the hood
+
+Replay uses event sourcing to decouple writes and reads and to transform seemingly synchronous workflows
+into robust asynchronous fault-oblivious logic.    
+
+The diagram below shows a high lever overview of the replay architecture. 
+It contains the following elements:
+- `replay server binary`: Serves the replay grpc API (for both internal client `IntCl` and replay client `RepCl`) that allows inserting events into the event log as well as streaming events from it. It also runs the sleep and signal logic.
+- `user app binary`: The user application binary that is using the replay framework/sdk/package and which connects to the replay server vir grpc. 
+- `replay sdk/pkg`: Provides the replay client `RepCl` available to the user. Runs event consumers for the user's registered workflows and activities `WC`,`AC`.
+- `event log`: Append only reflex mysql event table storing all replay events.
+- `stream`: reflex event stream of the event log, provided by replay server grpc API and available in replay client `RepCl`.
+- `server`: package providing the grpc server API `gSrv` for the internal client `IntCl` and replay client `RepCl`. It also provides the server side DB client `DBCl` that is responsible for all actual DB calls. Note that the DB client also implements the internal and replay clients, so can be used to embed replay in the user application to avoid the need for an actual remote grpc server. 
+- `sleep`: Logic and database tables implementing the sleep feature.  
+- `signal`: Logic and database tables implementing the signal feature. Note that `SignalRun` inserts rows into signal feature tables and not directly into the event log. Only once a signal is matched with an AwaitSignal call, is an event inserted.
+- `IntCl`: Internal client used by the replay sdk to insert and query events.
+- `RepCl`: Replay client used by the user to run workflows and signal runs. 
+- There are only 4 replay event types (only applicable to the replay sdk):
+  - `cre`: `CreateRun` is inserted to start a workflow run iteration; `user->RC`. It contains the workflow input message.
+  - `req`: `ActivityRequest ` indicates a worfklow run has requested an activity; `wfunc->RG->IC`. It contains the activity input message.   
+  - `res`: `ActivityResponse ` indicates a response from an activity; `afunc->AC->IC`. It contains the activity output messagean activity.
+  - `com`: `CompleteRun` indicates a workflow run has completed `RG->IC`.   
+- `AC`: Activity consumer is a reflex event consumer. It consumes activity request `req` events, executes the activity function `afunc` and inserts activity responses `res` in the event log via the internal client `IntCl`. It is started by the user calling `RegisterActivity` on the replay sdk.
+- `WC`: Workflow consumer is a reflex event consumer. It consumes create run `cre` and activity reponse `res` events. It manages multiple run goroutines `RG`, one per run and passes the events them. It is started by the user calling `RegisterWorkflow` on the replay sdk.
+- `RG`: Run goroutine is the actual goroutine executing the workflow function `wfunc`. It is managed by, and receives all input from, the workflow consumer `WC`. When the workflow function calls `ExecActivity`, it inserts an activity request `req` in the event log via the internal client `IntCl` and awaits a response `res` from the workflow consumer `WC`. When the workflow function returns, it inserts a run complete event `com`.   
+  
+```text
+                             user app binary 
+replay server binary        ┌──────────────────────────────────────────────────────┐
+┌────────────────────┐      │  replay SDK/pkg                                      │
+│   ┌─────────┐stream│      │ ┌───────────────────────────────┐                    │
+│ ┌►│event log│════> │      │ │                req            │                    │
+│ │ └─────────┘      │      │ │      req  ┌──┐ ───►afunc()──┐ │                    │
+│ │                  │ grpc │ │     ════> │AC│ res          │ │◄──RegisterActivity │
+│ │    server        │◄────►│ │          ┌┴──┘ ◄────────────┘ │     afunc()        │
+│ │ ┌────┬────┐      │      │ │          │res                 │                    │
+│ └─┤DBCl│gSrv│◄─... │      │ │          ▼                    │                    │
+│   └────┴────┘      │      │ │      ┌─────┐          ┌─────┐ │◄──RunWorkflow      │
+│    ▲               │      │ │ ...◄─┤IntCl│     ...◄─┤RepCl│ │                    │
+│    │ ┌──────┐      │      │ │      └─────┘          └─────┘ │◄──SignalRun        │
+│    ├─┤sleep │<══╝  │      │ │          ▲req                 │                    │
+│    │ └──────┘      │      │ │          │com  cre            │                    │
+│    │               │      │ │ cre      └┬──┐ ───►wfunc()──┐ │                    │
+│    │ ┌──────┐      │      │ │ res ┌──┐  │RG│ req/res ▲    │ │                    │
+│    └─┤signal│<══╝  │      │ │ ═══>│WC├─►│  │ ◄───────┘    │ │◄──RegisterWorkflow │
+│      └──────┘      │      │ │     └──┘  │  │ com          │ │     wfunc()        │
+└────────────────────┘      │ │           └──┘ ◄────────────┘ │                    │
+                            │ └───────────────────────────────┘                    │
+                            └──────────────────────────────────────────────────────┘
+```
+
+## TODO
+
+- Add type check test.

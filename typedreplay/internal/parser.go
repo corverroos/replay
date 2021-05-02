@@ -47,7 +47,7 @@ func Parse(file string) (Namespace, error) {
 				continue
 			}
 
-			if !isSelector(cl.Type, "replaygen", "Namespace") {
+			if !isSelector(cl.Type, "typedreplay", "Namespace") {
 				continue
 			}
 
@@ -95,7 +95,7 @@ func parseWorkflows(fset *token.FileSet, ex ast.Expr) ([]Workflow, error) {
 		return nil, errors.New("workflows not composite literal")
 	}
 	typ, ok := cl.Type.(*ast.ArrayType)
-	if !ok || !isSelector(typ.Elt, "replaygen", "Workflow") {
+	if !ok || !isSelector(typ.Elt, "typedreplay", "Workflow") {
 		return nil, errors.New("workflows not slice composite literal")
 	}
 	var res []Workflow
@@ -157,7 +157,7 @@ func parseSignals(fset *token.FileSet, ex ast.Expr) ([]Signal, error) {
 		return nil, errors.New("signals not composite literal")
 	}
 	typ, ok := cl.Type.(*ast.ArrayType)
-	if !ok || !isSelector(typ.Elt, "replaygen", "Signal") {
+	if !ok || !isSelector(typ.Elt, "typedreplay", "Signal") {
 		return nil, errors.New("signals not slice composite literal")
 	}
 	var res []Signal
@@ -221,7 +221,7 @@ func parseActivities(fset *token.FileSet, ex ast.Expr) ([]Activity, error) {
 		return nil, errors.New("activities not composite literal")
 	}
 	typ, ok := cl.Type.(*ast.ArrayType)
-	if !ok || !isSelector(typ.Elt, "replaygen", "Activity") {
+	if !ok || !isSelector(typ.Elt, "typedreplay", "Activity") {
 		return nil, errors.New("activities not slice composite literal")
 	}
 	var res []Activity

@@ -3,20 +3,20 @@ package sleep
 import (
 	"context"
 	"database/sql"
+	"path"
 	"time"
 
-	"github.com/corverroos/replay"
-	"github.com/corverroos/replay/internal"
-	"github.com/corverroos/replay/internal/db"
-	"github.com/corverroos/replay/internal/replaypb"
 	"github.com/luno/fate"
 	"github.com/luno/jettison/errors"
 	"github.com/luno/jettison/log"
 	"github.com/luno/reflex"
 	"github.com/luno/reflex/rpatterns"
-)
 
-//go:generate protoc --go_out=plugins=grpc:. ./sleep.proto
+	"github.com/corverroos/replay"
+	"github.com/corverroos/replay/internal"
+	"github.com/corverroos/replay/internal/db"
+	"github.com/corverroos/replay/internal/replaypb"
+)
 
 func RegisterForTesting(ctx context.Context, cl replay.Client, cstore reflex.CursorStore, dbc *sql.DB) {
 	pollPeriod = time.Millisecond * 100
@@ -60,7 +60,8 @@ func Register(getCtx func() context.Context, cl replay.Client, cstore reflex.Cur
 		return nil
 	}
 
-	spec := reflex.NewSpec(cl.Stream("*"), cstore, reflex.NewConsumer(internal.ActivitySleep, fn))
+	consumer := path.Join("replay_activity", "internal", internal.ActivitySleep)
+	spec := reflex.NewSpec(cl.Stream("*"), cstore, reflex.NewConsumer(consumer, fn))
 	go rpatterns.RunForever(getCtx, spec)
 	go completeSleepsForever(getCtx, cl.Internal(), dbc)
 }

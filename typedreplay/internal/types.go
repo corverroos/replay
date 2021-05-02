@@ -2,7 +2,7 @@ package internal
 
 import "strings"
 
-// Namespace describes a replay namespace to generation.
+// Namespace describes a replay namespace to generate.
 type Namespace struct {
 	PackageName string
 	Name        string
@@ -11,7 +11,7 @@ type Namespace struct {
 	Imports     map[string]string
 }
 
-// Workflow describes a parsed replaygen.Workflow instance.
+// Workflow describes a parsed typedreplay.Workflow instance.
 type Workflow struct {
 	Name        string
 	Description string
@@ -19,6 +19,7 @@ type Workflow struct {
 	Signals     []Signal
 }
 
+// Activity describes a parsed typedreplay.Activity instance.
 type Activity struct {
 	Name        string
 	Description string
@@ -27,6 +28,7 @@ type Activity struct {
 	Output      PBType
 }
 
+// Signal describes a parsed typedreplay.Signal instance.
 type Signal struct {
 	Name        string
 	Description string
@@ -34,6 +36,7 @@ type Signal struct {
 	Message     PBType
 }
 
+// PBType describes a parsed protobuf type.
 type PBType struct {
 	Package string
 	Name    string

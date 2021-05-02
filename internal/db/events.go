@@ -3,30 +3,30 @@ package db
 import (
 	"context"
 	"database/sql"
-	"testing"
+	"strings"
 
-	"github.com/corverroos/replay"
-	"github.com/corverroos/replay/internal"
 	"github.com/luno/jettison/errors"
 	"github.com/luno/jettison/j"
 	"github.com/luno/reflex"
 	"github.com/luno/reflex/rsql"
+
+	"github.com/corverroos/replay/internal"
 )
 
-var events = rsql.NewEventsTable("replay_events",
-	rsql.WithEventTimeField("timestamp"),
-	rsql.WithEventsInMemNotifier(),
-	rsql.WithEventMetadataField("message"),
-	rsql.WithEventForeignIDField("`key`"),
-	rsql.WithEventsInserter(inserter),
-)
+const noopPrefix = "replay_noop"
+
+func DefaultEvents() *rsql.EventsTable {
+	return rsql.NewEventsTable("replay_events",
+		rsql.WithEventTimeField("timestamp"),
+		rsql.WithEventsInMemNotifier(),
+		rsql.WithEventMetadataField("message"),
+		rsql.WithEventForeignIDField("`key`"),
+		rsql.WithEventsInserter(inserter),
+	)
+}
 
 // ToStream returns a reflex stream filtering only events for the namespace unless a wildcard is provided.
-func ToStream(dbc *sql.DB, namespace string) reflex.StreamFunc {
-	if namespace == "*" {
-		return events.ToStream(dbc)
-	}
-
+func ToStream(dbc *sql.DB, events *rsql.EventsTable, namespace string) reflex.StreamFunc {
 	return func(ctx context.Context, after string, opts ...reflex.StreamOption) (reflex.StreamClient, error) {
 		cl, err := events.ToStream(dbc)(ctx, after, opts...)
 		if err != nil {
@@ -52,12 +52,17 @@ func (f *filter) Recv() (*reflex.Event, error) {
 			return nil, err
 		}
 
+		if strings.HasPrefix(e.ForeignID, noopPrefix) && e.Type.ReflexType() == 0 {
+			// Always filter out noop gaps.
+			continue
+		}
+
 		key, err := internal.DecodeKey(e.ForeignID)
 		if err != nil {
 			return nil, err
 		}
 
-		if key.Namespace != f.namespace {
+		if f.namespace != "*" && key.Namespace != f.namespace {
 			continue
 		}
 
@@ -65,14 +70,7 @@ func (f *filter) Recv() (*reflex.Event, error) {
 	}
 }
 
-// CleanCache clears the cache after testing to clear test artifacts.
-func CleanCache(t *testing.T) {
-	t.Cleanup(func() {
-		events = events.Clone()
-	})
-}
-
-func RestartRun(ctx context.Context, dbc *sql.DB, key string, message []byte) error {
+func RestartRun(ctx context.Context, dbc *sql.DB, events *rsql.EventsTable, key string, message []byte) error {
 	k, err := internal.DecodeKey(key)
 	if err != nil {
 		return err
@@ -85,8 +83,8 @@ func RestartRun(ctx context.Context, dbc *sql.DB, key string, message []byte) er
 	defer tx.Rollback()
 
 	// Mark previous iteration as complete
-	notify1, err := insertTx(ctx, tx, key, internal.CompleteRun, nil)
-	if errors.Is(err, replay.ErrDuplicate) {
+	notify1, err := insertTX(ctx, events, tx, key, internal.CompleteRun, nil)
+	if errors.Is(err, internal.ErrDuplicate) {
 		// NoReturnErr: Continue below
 	} else if err != nil {
 		return err
@@ -96,8 +94,8 @@ func RestartRun(ctx context.Context, dbc *sql.DB, key string, message []byte) er
 
 	// Start next iteration.
 	k.Iteration++
-	notify2, err := insertTx(ctx, tx, k.Encode(), internal.CreateRun, message)
-	if errors.Is(err, replay.ErrDuplicate) {
+	notify2, err := insertTX(ctx, events, tx, k.Encode(), internal.CreateRun, message)
+	if errors.Is(err, internal.ErrDuplicate) {
 		// NoReturnErr: Continue below
 	} else if err != nil {
 		return err
@@ -108,7 +106,7 @@ func RestartRun(ctx context.Context, dbc *sql.DB, key string, message []byte) er
 	return tx.Commit()
 }
 
-func ListBootstrapEvents(ctx context.Context, dbc *sql.DB, key string) ([]reflex.Event, error) {
+func ListBootstrapEvents(ctx context.Context, dbc *sql.DB, events *rsql.EventsTable, key string) ([]reflex.Event, error) {
 	k, err := internal.DecodeKey(key)
 	if err != nil {
 		return nil, err
@@ -141,14 +139,14 @@ func ListBootstrapEvents(ctx context.Context, dbc *sql.DB, key string) ([]reflex
 	return res, rows.Err()
 }
 
-func Insert(ctx context.Context, dbc *sql.DB, key string, typ internal.EventType, message []byte) error {
+func Insert(ctx context.Context, dbc *sql.DB, events *rsql.EventsTable, key string, typ internal.EventType, message []byte) error {
 	tx, err := dbc.Begin()
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
 
-	notify, err := insertTx(ctx, tx, key, typ, message)
+	notify, err := insertTX(ctx, events, tx, key, typ, message)
 	if err != nil {
 		return err
 	}
@@ -157,7 +155,7 @@ func Insert(ctx context.Context, dbc *sql.DB, key string, typ internal.EventType
 	return tx.Commit()
 }
 
-func insertTx(ctx context.Context, tx *sql.Tx, key string, typ internal.EventType, message []byte) (rsql.NotifyFunc, error) {
+func insertTX(ctx context.Context, events *rsql.EventsTable, tx *sql.Tx, key string, typ internal.EventType, message []byte) (rsql.NotifyFunc, error) {
 	// Do lookup to avoid creating tons of gaps when replaying long running runs.
 	var exists int
 	err := tx.QueryRowContext(ctx, "select exists("+
@@ -166,12 +164,12 @@ func insertTx(ctx context.Context, tx *sql.Tx, key string, typ internal.EventTyp
 	if err != nil {
 		return nil, err
 	} else if exists == 1 {
-		return func() {}, nil
+		return func() {}, errors.Wrap(internal.ErrDuplicate, "duplicate for key", j.KS("key", key))
 	}
 
 	notify, err := events.InsertWithMetadata(ctx, tx, key, typ, message)
 	if err, ok := MaybeWrapErrDuplicate(err, "by_type_key"); ok {
-		return nil, errors.Wrap(err, "insert")
+		return nil, err
 	} else if err != nil {
 		return nil, err
 	}

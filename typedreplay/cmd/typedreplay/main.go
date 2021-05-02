@@ -7,7 +7,7 @@ import (
 	"os"
 	"path"
 
-	"github.com/corverroos/replay/replaygen/internal"
+	"github.com/corverroos/replay/typedreplay/internal"
 )
 
 var debug = flag.Bool("debug", false, "Enables debugging compile errors")

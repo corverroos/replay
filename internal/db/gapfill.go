@@ -3,10 +3,9 @@ package db
 import (
 	"context"
 	"database/sql"
-	"strconv"
+	"fmt"
 	"time"
 
-	"github.com/corverroos/replay/internal"
 	"github.com/go-sql-driver/mysql"
 	"github.com/luno/jettison/errors"
 	"github.com/luno/jettison/j"
@@ -14,7 +13,7 @@ import (
 	"github.com/luno/reflex/rsql"
 )
 
-func FillGaps(dbc *sql.DB) {
+func FillGaps(dbc *sql.DB, events *rsql.EventsTable) {
 	events.ListenGaps(makeFill(dbc))
 }
 
@@ -49,10 +48,9 @@ func fillGap(ctx context.Context, dbc *sql.DB, id int64) error {
 
 	// It does not exists at all, so insert noop.
 	_, err = dbc.ExecContext(ctx, "insert into replay_events set id=?, `key`=?, "+
-		"timestamp=now(3), type=0", id, internal.Key{Workflow: "gap", Sequence: strconv.FormatInt(id, 10)}.Encode())
-
-	if isMySQLErr(err, 1062) {
-		// MySQL duplicate entry error. Someone got there first, but that's ok.
+		"namespace='', workflow='', iteration=0, timestamp=now(3), type=0", id,
+		fmt.Sprintf("%s/%d", noopPrefix, id))
+	if err, ok := MaybeWrapErrDuplicate(err, "by_type_key"); ok {
 		return nil
 	} else if err != nil {
 		return err

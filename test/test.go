@@ -6,22 +6,28 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/luno/reflex"
+	"github.com/luno/reflex/rsql"
+
 	"github.com/corverroos/replay"
 	"github.com/corverroos/replay/internal/db"
 	"github.com/corverroos/replay/internal/signal"
 	"github.com/corverroos/replay/internal/sleep"
-	"github.com/luno/reflex"
+	"github.com/corverroos/replay/server"
 )
 
-func ConnectDB(t *testing.T) *sql.DB {
-	return db.ConnectForTesting(t)
+func Setup(t *testing.T, opts ...rsql.EventsOption) (*server.DBClient, *sql.DB) {
+	dbc := db.ConnectForTesting(t)
+	cl := server.NewDBClient(dbc, opts...)
+	db.FillGaps(dbc, cl.Events())
+	return cl, dbc
 }
 
 func RegisterNoopSleeps(ctx context.Context, cl replay.Client, cstore reflex.CursorStore, dbc *sql.DB) {
 	sleep.RegisterForTesting(ctx, cl, cstore, dbc)
 }
 
-func RegisterNoSleepSignals(ctx context.Context, cl replay.Client, cstore reflex.CursorStore, dbc *sql.DB) {
+func RegisterNoSleepSignals(ctx context.Context, cl *server.DBClient, cstore reflex.CursorStore, dbc *sql.DB) {
 	signal.RegisterForTesting(ctx, cl, cstore, dbc)
 }
 

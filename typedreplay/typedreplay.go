@@ -1,4 +1,6 @@
-package replaygen
+// Package typedreplay provides the input definitions for the typedreplay command that generates
+// a typed replay API based on the input.
+package typedreplay
 
 import "github.com/golang/protobuf/proto"
 
