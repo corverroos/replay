@@ -114,6 +114,8 @@ func RegisterActivity(getCtx func() context.Context, cl Client, cstore reflex.Cu
 			return err
 		}
 
+		ctx = log.ContextWith(ctx, j.KS("replay_run", key.Run))
+
 		args := []reflect.Value{
 			reflect.ValueOf(ctx),
 			reflect.ValueOf(backends),
