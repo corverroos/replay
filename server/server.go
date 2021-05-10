@@ -6,7 +6,6 @@ import (
 	"context"
 	"database/sql"
 
-	"github.com/luno/jettison/errors"
 	"github.com/luno/reflex"
 	"google.golang.org/grpc"
 
@@ -35,12 +34,16 @@ func (s *Server) SignalRun(ctx context.Context, req *pb.SignalRequest) (*pb.OK, 
 	return &pb.OK{Ok: ok}, err
 }
 
-func (s *Server) RequestActivity(ctx context.Context, req *pb.ActivityMessage) (*pb.Empty, error) {
-	return swallowErrDupPB(s.cl.requestActivityServer(ctx, req.Key, req.Message))
+func (s *Server) RequestActivity(ctx context.Context, req *pb.KeyMessage) (*pb.Empty, error) {
+	return new(pb.Empty), s.cl.requestActivityServer(ctx, req.Key, req.Message)
 }
 
-func (s *Server) RespondActivity(ctx context.Context, req *pb.ActivityMessage) (*pb.Empty, error) {
-	return swallowErrDupPB(s.cl.RespondActivityServer(ctx, req.Key, req.Message))
+func (s *Server) RespondActivity(ctx context.Context, req *pb.KeyMessage) (*pb.Empty, error) {
+	return new(pb.Empty), s.cl.RespondActivityServer(ctx, req.Key, req.Message)
+}
+
+func (s *Server) EmitOutput(ctx context.Context, req *pb.KeyMessage) (*pb.Empty, error) {
+	return new(pb.Empty), s.cl.emitOutputServer(ctx, req.Key, req.Message)
 }
 
 func (s *Server) CompleteRun(ctx context.Context, req *pb.CompleteRequest) (*pb.Empty, error) {
@@ -71,7 +74,7 @@ func (s *Server) ListBootstrapEvents(ctx context.Context, req *pb.ListBootstrapR
 }
 
 func (s *Server) Stream(req *pb.StreamRequest, srv pb.Replay_StreamServer) error {
-	return s.rserver.Stream(s.cl.Stream(req.Namespace), req.Req, srv)
+	return s.rserver.Stream(s.cl.Stream(req.Namespace, req.Workflow, req.Run), req.Req, srv)
 }
 
 func New(cl *DBClient) *Server {
@@ -95,14 +98,4 @@ func StartLoops(getCtx func() context.Context, cl *DBClient, cstore reflex.Curso
 	sleep.Register(getCtx, cl, cstore, dbc)
 	signal.Register(getCtx, cl, cstore, dbc)
 	db.FillGaps(dbc, cl.Events())
-}
-
-func swallowErrDupPB(err error) (*pb.Empty, error) {
-	if errors.Is(err, internal.ErrDuplicate) {
-		// NoReturnErr: Swallow
-		return new(pb.Empty), nil
-	} else if err != nil {
-		return nil, err
-	}
-	return new(pb.Empty), nil
 }

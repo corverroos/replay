@@ -15,8 +15,11 @@ import (
 
 const (
 	_ns     = "{{.Name}}"
-	{{- range .Workflows}}
+	{{- range .Workflows}} {{$workflowPascal := .Pascal}}
 	_w{{.Pascal}} = "{{.Name}}"
+	  {{- range .Outputs}}
+    _o{{$workflowPascal}}{{.Pascal}} = "{{.Name}}"
+      {{- end}}
 	{{- end}}
 	{{- range .Activities}}
     _a{{.Pascal}} = "{{.Name}}"
@@ -116,6 +119,11 @@ type {{.Camel}}Flow interface {
 	// received for this run. If no signal is/was received it returns false after d duration.
 	Await{{.Pascal}}(d time.Duration) (*{{.Message}}, bool)
 	{{- end}}
+	{{range .Outputs}}
+
+    // Emit{{.Pascal}} stores the {{.Name}} output in the event log and returns when successful.
+    Emit{{.Pascal}}(message *{{.Message}})
+    {{end}}
 }
 
 type {{.Camel}}FlowImpl struct {
@@ -157,4 +165,39 @@ func (f {{$workflowCamel}}FlowImpl) Await{{.Pascal}}(d time.Duration) (*{{.Messa
 	return res.(*{{.Message}}), true
 }
 {{end}}
+
+{{range .Outputs}}
+func (f {{$workflowCamel}}FlowImpl) Emit{{.Pascal}}(message *{{.Message}}) {
+	f.ctx.EmitOutput(_o{{$workflowPascal}}{{.Pascal}}, message)
+}
+{{end}}
+
+// Stream{{.Pascal}} returns a stream of replay events for the {{.Name}} workflow and an optional run.
+func Stream{{.Pascal}}(cl replay.Client, run string) reflex.StreamFunc {
+	return cl.Stream(_ns, _w{{.Pascal}}, run)
+}
+
+{{range .Outputs}}
+// Handle{{.Pascal}} calls fn and returns true if the event is a {{.Name}} output.
+// Use Stream{{$workflowPascal}} to provide the events.
+func Handle{{.Pascal}}(e *reflex.Event, fn func(run string, message *{{.Message}}) error) (bool, error){
+	var ok bool
+	err := replay.Handle(e,
+		replay.HandleSkip(func(namespace, workflow, run string) bool {
+			return namespace != _ns || workflow != _w{{$workflowPascal}}
+		}),
+		replay.HandleOutput(func(namespace, workflow, run string, output string, message proto.Message) error {
+			if output != _o{{$workflowPascal}}{{.Pascal}} {
+				return nil
+			}
+			ok = true
+			return fn(run, message.(*{{.Message}}))
+		}))
+	if err != nil {
+		return false, err
+	}
+	return ok, nil
+}
+{{end}}
+
 {{end}}

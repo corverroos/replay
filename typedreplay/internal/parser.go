@@ -138,6 +138,11 @@ func parseWorkflow(fset *token.FileSet, ex ast.Expr) (Workflow, error) {
 			if err != nil {
 				return Workflow{}, errors.Wrap(err, "workflow signals", j.KS("workflow", res.Name))
 			}
+		case "Outputs":
+			res.Outputs, err = parseOutputs(fset, kv.Value)
+			if err != nil {
+				return Workflow{}, errors.Wrap(err, "workflow signals", j.KS("workflow", res.Name))
+			}
 		case "Description":
 			res.Description, err = parseName(kv.Value)
 			if err != nil {
@@ -145,6 +150,65 @@ func parseWorkflow(fset *token.FileSet, ex ast.Expr) (Workflow, error) {
 			}
 		default:
 			return Workflow{}, errors.New("unknown field", j.KS("field", gofmt(fset, kv.Key)))
+		}
+	}
+
+	return res, nil
+}
+
+func parseOutputs(fset *token.FileSet, ex ast.Expr) ([]Output, error) {
+	cl, ok := ex.(*ast.CompositeLit)
+	if !ok {
+		return nil, errors.New("outputs not composite literal")
+	}
+	typ, ok := cl.Type.(*ast.ArrayType)
+	if !ok || !isSelector(typ.Elt, "typedreplay", "Output") {
+		return nil, errors.New("outputs not slice composite literal")
+	}
+	var res []Output
+	for _, ex := range cl.Elts {
+		out, err := parseOutput(fset, ex)
+		if err != nil {
+			return nil, err
+		}
+		res = append(res, out)
+	}
+	return res, nil
+}
+
+func parseOutput(fset *token.FileSet, ex ast.Expr) (Output, error) {
+	cl, ok := ex.(*ast.CompositeLit)
+	if !ok {
+		return Output{}, errors.New("output not composite literal")
+	}
+
+	opt := j.KS("output", gofmt(fset, cl))
+	var (
+		res Output
+		err error
+	)
+
+	for _, elt := range cl.Elts {
+		kv := elt.(*ast.KeyValueExpr)
+
+		switch kv.Key.(*ast.Ident).Name {
+		case "Name":
+			res.Name, err = parseName(kv.Value)
+			if err != nil {
+				return Output{}, errors.Wrap(err, "output name", opt)
+			}
+		case "Message":
+			res.Message, err = parseType(kv.Value)
+			if err != nil {
+				return Output{}, errors.Wrap(err, "output message", opt)
+			}
+		case "Description":
+			res.Description, err = parseName(kv.Value)
+			if err != nil {
+				return Output{}, errors.Wrap(err, "output description")
+			}
+		default:
+			return Output{}, errors.New("unknown field", j.KS("field", gofmt(fset, kv.Key)))
 		}
 	}
 

@@ -27,7 +27,7 @@ func TestGapFill(t *testing.T) {
 		jtest.RequireNil(t, err)
 		defer tx.Rollback()
 
-		notify, err := events.InsertWithMetadata(ctx, tx, internal.MinKey("ns", "w", "r", i), internal.CreateRun, nil)
+		notify, err := events.InsertWithMetadata(ctx, tx, internal.MinKey("ns", "w", "r", i), internal.RunCreated, nil)
 		if err, ok := MaybeWrapErrDuplicate(err, "by_type_key"); ok {
 			return false
 		} else {
@@ -44,7 +44,7 @@ func TestGapFill(t *testing.T) {
 	require.False(t, insert(1)) // Gap
 	require.True(t, insert(2))
 
-	sc, err := ToStream(dbc, events, "*")(ctx, "")
+	sc, err := ToStream(dbc, events, "", "", "")(ctx, "")
 	jtest.RequireNil(t, err)
 
 	for i := 0; i < 3; i++ {

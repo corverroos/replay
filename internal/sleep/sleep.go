@@ -18,6 +18,9 @@ import (
 	"github.com/corverroos/replay/internal/replaypb"
 )
 
+// TODO(vaughan): Fix
+// //go:generate protoc --go_out=plugins=grpc:. ./sleep.proto
+
 func RegisterForTesting(ctx context.Context, cl replay.Client, cstore reflex.CursorStore, dbc *sql.DB) {
 	pollPeriod = time.Millisecond * 100
 	shouldComplete = func(completeAt time.Time) bool {
@@ -37,7 +40,7 @@ func Register(getCtx func() context.Context, cl replay.Client, cstore reflex.Cur
 			return err
 		}
 
-		if key.Activity != internal.ActivitySleep {
+		if key.Target != internal.ActivitySleep {
 			return nil
 		}
 
@@ -61,7 +64,7 @@ func Register(getCtx func() context.Context, cl replay.Client, cstore reflex.Cur
 	}
 
 	consumer := path.Join("replay_activity", "internal", internal.ActivitySleep)
-	spec := reflex.NewSpec(cl.Stream("*"), cstore, reflex.NewConsumer(consumer, fn))
+	spec := reflex.NewSpec(cl.Stream("", "", ""), cstore, reflex.NewConsumer(consumer, fn))
 	go rpatterns.RunForever(getCtx, spec)
 	go completeSleepsForever(getCtx, cl.Internal(), dbc)
 }

@@ -40,7 +40,7 @@ var errAckTimeout = errors.New("timeout waiting for ack ", j.C("ERR_20099904c7fa
 
 // Client defines the main replay sdk API.
 type Client interface {
-	// RunWorkflow returns true if it a CreateRun event
+	// RunWorkflow returns true if it a RunCreated event
 	// was inserted which will result in an invocation
 	// of the workflow with the message.
 	//
@@ -55,14 +55,16 @@ type Client interface {
 	// the signal was already created.
 	SignalRun(ctx context.Context, namespace, workflow, run string, s Signal, message proto.Message, extID string) (bool, error)
 
-	// Stream returns a replay events stream function for the namespace.
-	Stream(namespace string) reflex.StreamFunc
+	// Stream returns a replay events stream function with optional namespace, workflow and run filters.
+	// Note that empty filters can have a negative performance impact.
+	Stream(namespace, workflow, run string) reflex.StreamFunc
 
 	// Internal returns the internal replay API. This should only be used by this replay package itself.
 	Internal() internal.Client
 }
 
-// Signal defines a signal.
+// Signal defines a signal that can be sent to a run. The run can then listen and process specific signals.
+// TODO(corver): Refactor this to just a string. Type safety can be moved to typedreplay.
 type Signal interface {
 	// SignalType return the signal enum, identifying different signal types of a workflow.
 	SignalType() int
@@ -100,7 +102,7 @@ func RegisterActivity(getCtx func() context.Context, cl Client, cstore reflex.Cu
 			return err
 		}
 
-		if key.Activity != activity || key.Namespace != namespace || !ofShard(o, key.Run) {
+		if key.Target != activity || key.Namespace != namespace || !ofShard(o, key.Run) {
 			return nil
 		}
 
@@ -129,7 +131,7 @@ func RegisterActivity(getCtx func() context.Context, cl Client, cstore reflex.Cu
 	}
 
 	consumer := path.Join("replay_activity", namespace, activity, shardSuffix(o))
-	spec := reflex.NewSpec(cl.Stream(namespace), cstore, reflex.NewConsumer(consumer, fn))
+	spec := reflex.NewSpec(cl.Stream(namespace, "", ""), cstore, reflex.NewConsumer(consumer, fn))
 	go rpatterns.RunForever(getCtx, spec)
 }
 
@@ -181,7 +183,7 @@ func RegisterWorkflow(getCtx func() context.Context, cl Client, cstore reflex.Cu
 		}
 
 		switch e.Type.ReflexType() {
-		case internal.CreateRun.ReflexType():
+		case internal.RunCreated.ReflexType():
 			metrics.IncStart()
 			logDebug(ctx, "starting run", j.KS("key", key.Encode()))
 			_, err := s.StartRun(ctx, e, key, message)
@@ -191,7 +193,9 @@ func RegisterWorkflow(getCtx func() context.Context, cl Client, cstore reflex.Cu
 			return err
 		case internal.ActivityRequest.ReflexType():
 			return nil
-		case internal.CompleteRun.ReflexType():
+		case internal.RunCompleted.ReflexType():
+			return nil
+		case internal.RunOutput.ReflexType():
 			return nil
 		default:
 			return errors.New("bug: unknown type")
@@ -199,7 +203,7 @@ func RegisterWorkflow(getCtx func() context.Context, cl Client, cstore reflex.Cu
 	}
 
 	consumer := path.Join("replay_workflow", namespace, workflow, shardSuffix(o))
-	spec := reflex.NewSpec(cl.Stream(namespace), cstore, reflex.NewConsumer(consumer, fn))
+	spec := reflex.NewSpec(cl.Stream(namespace, workflow, ""), cstore, reflex.NewConsumer(consumer, fn))
 	go rpatterns.RunForever(getCtx, spec)
 }
 
@@ -207,7 +211,7 @@ func RegisterWorkflow(getCtx func() context.Context, cl Client, cstore reflex.Cu
 type runState struct {
 	mu sync.Mutex
 
-	//  indexes maintains the request index/sequence per activity. The nth time a run calls an activity.
+	//  indexes maintains the request index/sequence per target. The nth time a run calls an activity/output.
 	indexes map[string]int
 
 	//  awaitTimeout defines the duration the run goroutine will wait for an activity response after
@@ -238,14 +242,14 @@ type ack struct {
 	cancel   bool
 }
 
-func (s *runState) GetAndInc(activity string) int {
+func (s *runState) GetAndInc(target string) int {
 	s.mu.Lock()
 	defer func() {
-		s.indexes[activity]++
+		s.indexes[target]++
 		s.mu.Unlock()
 	}()
 
-	return s.indexes[activity]
+	return s.indexes[target]
 }
 
 func (s *runState) AwaitActivity(ctx context.Context, key internal.Key) response {
@@ -283,7 +287,7 @@ type wcState struct {
 // the workflow function with the provided message. It blocks until an ack is received from the run goroutine.
 // It returns true if the run is still active (awaiting first activity response).
 //
-// TODO(corver): Dont start a run if a CompleteRun event already present (when reprocessing due to re-shard cursor reset).
+// TODO(corver): Dont start a run if a RunCompleted event already present (when reprocessing due to re-shard cursor reset).
 func (s *wcState) StartRun(ctx context.Context, e *reflex.Event, key internal.Key, message proto.Message) (bool, error) {
 	s.Lock()
 	defer s.Unlock()
@@ -347,7 +351,7 @@ func (s *wcState) bootstrapRun(ctx context.Context, run string, iter int, upTo i
 	}
 
 	for _, e := range el {
-		if reflex.IsType(e.Type, internal.CompleteRun) {
+		if reflex.IsType(e.Type, internal.RunCompleted) {
 			// Complete event in bootstrap list means logic changed
 			// and the run already completed before a previously requested
 			// activity's response.
@@ -369,7 +373,7 @@ func (s *wcState) bootstrapRun(ctx context.Context, run string, iter int, upTo i
 		}
 
 		if i == 0 {
-			if !reflex.IsType(e.Type, internal.CreateRun) {
+			if !reflex.IsType(e.Type, internal.RunCreated) {
 				return false, errors.New("bug: unexpected first event", j.KV("type", e.Type))
 			}
 
@@ -431,10 +435,15 @@ func (s *wcState) RespondActivity(ctx context.Context, e *reflex.Event, key inte
 
 	var expectErr bool
 	select {
-	case rs.resChan <- response{key: key, message: message, event: e}:
-	default:
+	case <-ctx.Done():
+		return false, ctx.Err()
+	case <-time.After(time.Second):
+		// Since there is a delay after the run goroutine acks that it is waiting for a response
+		// and before it blocks receiving on the response channel, we allow it some time to get there.
+		//
 		// Run goroutine not waiting, expect an error
 		expectErr = true
+	case rs.resChan <- response{key: key, message: message, event: e}:
 	}
 
 	ok, err := s.processAck(ctx, rs.ackChan)
@@ -532,7 +541,7 @@ func (c *RunContext) ExecActivity(activityFunc interface{}, message proto.Messag
 		Workflow:  c.workflow,
 		Run:       c.run,
 		Iteration: c.iter,
-		Activity:  activity,
+		Target:    activity,
 		Sequence:  fmt.Sprint(index),
 	}
 
@@ -559,7 +568,7 @@ func (c *RunContext) AwaitSignal(s Signal, duration time.Duration) (proto.Messag
 		Workflow:  c.workflow,
 		Run:       c.run,
 		Iteration: c.iter,
-		Activity:  activity,
+		Target:    activity,
 		Sequence:  seq.Encode(),
 	}
 	ensure(c, func() error {
@@ -576,6 +585,22 @@ func (c *RunContext) AwaitSignal(s Signal, duration time.Duration) (proto.Messag
 	return res.message, true
 }
 
+// EmitOutput stores the output in the event log and returns on success.
+func (c *RunContext) EmitOutput(output string, message proto.Message) {
+	index := c.state.GetAndInc("output:" + output)
+	key := internal.Key{
+		Namespace: c.namespace,
+		Workflow:  c.workflow,
+		Run:       c.run,
+		Iteration: c.iter,
+		Target:    output,
+		Sequence:  fmt.Sprint(index),
+	}
+	ensure(c, func() error {
+		return c.cl.EmitOutput(c, key.Encode(), message)
+	})
+}
+
 // Sleep blocks for at least d duration.
 //
 // Note that replay sleeps aren't very accurate and
@@ -588,7 +613,7 @@ func (c *RunContext) Sleep(duration time.Duration) {
 		Workflow:  c.workflow,
 		Run:       c.run,
 		Iteration: c.iter,
-		Activity:  activity,
+		Target:    activity,
 		Sequence:  fmt.Sprint(index),
 	}
 
@@ -601,13 +626,13 @@ func (c *RunContext) Sleep(duration time.Duration) {
 	c.state.AwaitActivity(c, key)
 }
 
-// CreateEvent returns the reflex event that started the run iteration (type is internal.CreateRun).
+// CreateEvent returns the reflex event that started the run iteration (type is internal.RunCreated).
 // The event timestamp could be used to reason about run age.
 func (c *RunContext) CreateEvent() *reflex.Event {
 	return c.createEvent
 }
 
-// LastEvent returns the latest reflex event (type is either internal.CreateRun or internal.ActivityResponse).
+// LastEvent returns the latest reflex event (type is either internal.RunCreated or internal.ActivityResponse).
 // The event timestamp could be used to reason about run age.
 func (c *RunContext) LastEvent() *reflex.Event {
 	return c.lastEvent

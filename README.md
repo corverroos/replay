@@ -1,24 +1,52 @@
 # replay
 
-Replay is a PoC workflow framework inspired by [temporal](www.temporal.io) but implemented using a mysql reflex events.
+Replay is a robust durable asynchronous distributed application logic framework. 
 
-See [TestExample](./example/example_test.go) for an overview of the replay API.
+Inspired by [temporal](www.temporal.io) but implemented using reflex and mysql, it 
+uses the event sourcing pattern combined with event streams resulting in fault-oblivious logic.
+
+- Robust: Automatic retries on all failures, makes it fault-oblivious to all temporary errors. 
+- Durable: All state changes are automatically persisted in the event log, allowing long running stateful logic across restarts.
+- Asynchronous: All communication happens asynchronously via the event log
+- Distributed: Input, output, and logic execution are decoupled and can be performed by different processes.
+- Application logic: Arbitrary logic is supported as long as workflows are deterministic and activities are idempotent.  
+
+## Overview 
+
+Replay SDK enable you to build applications around a set of key concepts.
+                                             
+- Workflows: Deterministic functions forming the entry points to units of application logic.
+- Activities: Functions that handle non-deterministic business logic. Accepting read-write calls from workflows.
+- Runs: Invocations of workflow functions with specific input resulting in calls to activities and/or outputs.
+- Signals: Write-only calls to workflow runs that the workflow can listen for and react on.
+- Outputs: Write-only calls emitted by workflow runs that application logic can consume.
 
 ## Notes
 - A workflow stitches together a bunch of activities within a logical flow.
 - An activity takes and argument, executes arbitrary logic (including side effects) and returns a result.
-- A workflow is similar to the golang function definition: `func workflowFoo(context.Context, args proto.Message)`.
-- An activity is similar to the golang function definition: `func doSomething(context.Context, Backends, proto.Message) proto.Message, error`
-- A run is an invocation of that function with an argument: `workflowFoo(ctx, &Bar{Field:"baz"})`
+- Outputs are data emitted by workflow runs. It allows workflows to publish data that application logic can subscribe to.
+- Signals are data send to workflow runs by application logic. It allows workflows to react to external events.   
 - A workflow function supports calling activities with arbitrary logic flow (if/for/sleep) but has the following limitations
   - It must be deterministic (no usage of rand, time packages)
   - It may not have side effects (no usage of log, backends packages)
-- Side effects must be limited to activities.
+- Side effects must be limited to activities or outputs.
+
+> Outputs vs Activities: Both activities and outputs can be used by workflows to trigger business 
+> logic with data. 
+> An activity's input, logic and output are tightly coupled with a workflow (think function calls). 
+> While an output is only data emitted by a workflow decoupled from consuming logic (think pub/sub).
+> Another big benefit of outputs are that they do not impact workflow determinism in replay; that 
+> means outputs may be added to, reordered in, or removed from, active runs. It is therefore recommended
+> to use outputs over activities where possible.
+
+- A workflow is similar to the golang function definition: `func workflowFoo(context.Context, args proto.Message)`.
+- An activity is similar to the golang function definition: `func doSomething(context.Context, Backends, proto.Message) proto.Message, error`
+- A run is an invocation of that function with an argument: `workflowFoo(ctx, &Bar{Field:"baz"})`
 - The replay framework retries all activities indefinitely until no error is returned. 
 - Application logic errors should be returned in the result proto.  
 - Runs are robust to all temporary types of failure. They continue where they left off.
 - Activities should be idempotent, since they may be called twice for the same invocation.
-- Workflows and activities are defined within a namespace and should be unique in the namespace.
+- Workflows, activities, outputs and signals are defined within a namespace and should be unique in the namespace.
 - Signals is a way for external systems to send data/notifications to a workflow run.
 - Signals is an enum and are workflow and run specific.
 - Signals are consumed in the order they are received.
@@ -28,10 +56,10 @@ See [TestExample](./example/example_test.go) for an overview of the replay API.
 ## Safety
 
 The `replay.Client` and `replay.RunContext` APIs are not type safe. It up to the user of the replay framework
-to ensure that protobuf message types (input and output) passed to and returned from activities, signals and runs 
+to ensure that protobuf message types (input and output) passed to and returned from activities, signals, outputs and runs 
 match those defined in the actual code.
 
-The names of workflows, activities and signals must also match and may not change while runs are active. 
+The names of workflows, activities and outputs must also match and may not change while runs are active. 
 Renaming functions is therefore not allowed once used in production, except if explicit name overrides are used 
 via `replay.WithName`.
 
@@ -39,16 +67,16 @@ The `typedreplay` code generation tool is provided as a way to mitigate the abov
 code generation wrapper of the replay framework that generates a strongly typed API based on a structured 
 input definition. 
 
-A `typedreplay.Namespace` structure should be defined in code and includes all workflows, signals and activities names and types.
-The `typedreplay` command can be then be run by the `//go:generate typedreplay` directive in the same file.
+A `typedreplay.Namespace` structure should be defined in code and includes all workflows, signals, outputs and activity 
+names and types. The `typedreplay` command can then be run by the `//go:generate typedreplay` directive in the same file.
 
 A `replay_gen.go` file will then be generated that provides a type-safe API for that namespace and workflows.
-A type-safe workflow can then be implemented using the `{workflow}Flow` interface. Type-safe run and 
-signals functions are also generated.
+A type-safe workflow can then be implemented using the `{workflow}Flow` interface. Type-safe run, 
+signal, stream and output handling functions are also generated.
 
 `typedreplay` also provides the following benefits:
 - decoupling names stored in the DB from function names making renaming function safe.
-- all types and names are explicitly defiend so that breaking changes to them are easier to detect and block. 
+- all types and names are explicitly defined so that breaking changes to them are easier to prevent. 
 - unit testing workflow functions can be done using standard interface mocking.
 
 See these test file for examples: 
@@ -77,16 +105,20 @@ It contains the following elements:
 - `signal`: Logic and database tables implementing the signal feature. Note that `SignalRun` inserts rows into signal feature tables and not directly into the event log. Only once a signal is matched with an AwaitSignal call, is an event inserted.
 - `IntCl`: Internal client used by the replay sdk to insert and query events.
 - `RepCl`: Replay client used by the user to run workflows and signal runs. 
-- There are only 4 replay event types (only applicable to the replay sdk):
-  - `cre`: `CreateRun` is inserted to start a workflow run iteration; `user->RC`. It contains the workflow input message.
+- There are only 5 replay event types (only applicable to the replay sdk):
+  - `cre`: `RunCreated` is inserted to start a workflow run iteration; `user->RC`. It contains the workflow input message.
   - `req`: `ActivityRequest ` indicates a worfklow run has requested an activity; `wfunc->RG->IC`. It contains the activity input message.   
   - `res`: `ActivityResponse ` indicates a response from an activity; `afunc->AC->IC`. It contains the activity output messagean activity.
-  - `com`: `CompleteRun` indicates a workflow run has completed `RG->IC`.   
+  - `com`: `RunCompleted` indicates a workflow run has completed `RG->IC`.   
+  - `out`: `RunOutput` indicates an output from a workflow run `wfunc->RG->IC`.   
 - `AC`: Activity consumer is a reflex event consumer. It consumes activity request `req` events, executes the activity function `afunc` and inserts activity responses `res` in the event log via the internal client `IntCl`. It is started by the user calling `RegisterActivity` on the replay sdk.
 - `WC`: Workflow consumer is a reflex event consumer. It consumes create run `cre` and activity reponse `res` events. It manages multiple run goroutines `RG`, one per run and passes the events them. It is started by the user calling `RegisterWorkflow` on the replay sdk.
 - `RG`: Run goroutine is the actual goroutine executing the workflow function `wfunc`. It is managed by, and receives all input from, the workflow consumer `WC`. When the workflow function calls `ExecActivity`, it inserts an activity request `req` in the event log via the internal client `IntCl` and awaits a response `res` from the workflow consumer `WC`. When the workflow function returns, it inserts a run complete event `com`.   
+- `wfunc`: User defined workflow function.  
+- `afunc`: User defined activity function.  
+- `cfunc`: User defined reflex consumer function.
   
-```text
+```
                              user app binary 
 replay server binary        ┌──────────────────────────────────────────────────────┐
 ┌────────────────────┐      │  replay SDK/pkg                                      │
@@ -98,19 +130,15 @@ replay server binary        ┌────────────────�
 │ │ ┌────┬────┐      │      │ │          │res                 │                    │
 │ └─┤DBCl│gSrv│◄─... │      │ │          ▼                    │                    │
 │   └────┴────┘      │      │ │      ┌─────┐          ┌─────┐ │◄──RunWorkflow      │
-│    ▲               │      │ │ ...◄─┤IntCl│     ...◄─┤RepCl│ │                    │
-│    │ ┌──────┐      │      │ │      └─────┘          └─────┘ │◄──SignalRun        │
-│    ├─┤sleep │<══╝  │      │ │          ▲req                 │                    │
-│    │ └──────┘      │      │ │          │com  cre            │                    │
+│    ▲               │      │ │ ...◄─┤IntCl│     ...◄─┤RepCl│ │◄──SignalRun        │
+│    │ ┌──────┐      │      │ │      └─────┘          └─────┘ │──►Stream────┐      │
+│    ├─┤sleep │<══╝  │      │ │          ▲req                 │           cfunc()  │
+│    │ └──────┘      │      │ │          │com  cre            │◄─►Handle────┘      │
 │    │               │      │ │ cre      └┬──┐ ───►wfunc()──┐ │                    │
 │    │ ┌──────┐      │      │ │ res ┌──┐  │RG│ req/res ▲    │ │                    │
 │    └─┤signal│<══╝  │      │ │ ═══>│WC├─►│  │ ◄───────┘    │ │◄──RegisterWorkflow │
-│      └──────┘      │      │ │     └──┘  │  │ com          │ │     wfunc()        │
+│      └──────┘      │      │ │     └──┘  │  │ com/out      │ │     wfunc()        │
 └────────────────────┘      │ │           └──┘ ◄────────────┘ │                    │
                             │ └───────────────────────────────┘                    │
                             └──────────────────────────────────────────────────────┘
 ```
-
-## TODO
-
-- Add type check test.

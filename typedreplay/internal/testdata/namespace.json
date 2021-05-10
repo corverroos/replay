@@ -28,6 +28,24 @@
             "Name": "Int"
           }
         }
+      ],
+      "Outputs": [
+        {
+          "Name": "o1",
+          "Description": "Published int output values",
+          "Message": {
+            "Package": "",
+            "Name": "Int"
+          }
+        },
+        {
+          "Name": "o2",
+          "Description": "Published string output values",
+          "Message": {
+            "Package": "",
+            "Name": "String"
+          }
+        }
       ]
     },
     {
@@ -37,7 +55,17 @@
         "Package": "",
         "Name": "Empty"
       },
-      "Signals": null
+      "Signals": null,
+      "Outputs": [
+        {
+          "Name": "o3",
+          "Description": "Published int output values",
+          "Message": {
+            "Package": "",
+            "Name": "Int"
+          }
+        }
+      ]
     }
   ],
   "Activities": [

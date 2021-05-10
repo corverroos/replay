@@ -56,7 +56,26 @@ func (c *DBClient) runWorkflowServer(ctx context.Context, key string, message *a
 		return false, err
 	}
 
-	return swallowErrDup(db.Insert(ctx, c.dbc, c.events, key, internal.CreateRun, b))
+	return swallowErrDup(db.Insert(ctx, c.dbc, c.events, key, internal.RunCreated, b))
+}
+
+func (c *DBClient) EmitOutput(ctx context.Context, key string, message proto.Message) error {
+	apb, err := internal.ToAny(message)
+	if err != nil {
+		return err
+	}
+
+	return c.emitOutputServer(ctx, key, apb)
+}
+
+func (c *DBClient) emitOutputServer(ctx context.Context, key string, message *any.Any) error {
+	b, err := internal.Marshal(message)
+	if err != nil {
+		return err
+	}
+
+	_, err = swallowErrDup(db.Insert(ctx, c.dbc, c.events, key, internal.RunOutput, b))
+	return err
 }
 
 func (c *DBClient) SignalRun(ctx context.Context, namespace, workflow, run string, s replay.Signal, message proto.Message, extID string) (bool, error) {
@@ -111,7 +130,7 @@ func (c *DBClient) RespondActivityServer(ctx context.Context, key string, messag
 }
 
 func (c *DBClient) CompleteRun(ctx context.Context, key string) error {
-	_, err := swallowErrDup(db.Insert(ctx, c.dbc, c.events, key, internal.CompleteRun, nil))
+	_, err := swallowErrDup(db.Insert(ctx, c.dbc, c.events, key, internal.RunCompleted, nil))
 	return err
 }
 
@@ -138,8 +157,8 @@ func (c *DBClient) ListBootstrapEvents(ctx context.Context, key string) ([]refle
 	return db.ListBootstrapEvents(ctx, c.dbc, c.events, key)
 }
 
-func (c *DBClient) Stream(namespace string) reflex.StreamFunc {
-	return db.ToStream(c.dbc, c.events, namespace)
+func (c *DBClient) Stream(namespace, workflow, run string) reflex.StreamFunc {
+	return db.ToStream(c.dbc, c.events, namespace, workflow, run)
 }
 
 func (c *DBClient) Internal() internal.Client {

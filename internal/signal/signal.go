@@ -24,7 +24,7 @@ import (
 // replayClient is implemented by server.Client.
 type replayClient interface {
 	// Stream returns a replay events stream function for the namespace.
-	Stream(namespace string) reflex.StreamFunc
+	Stream(namespace, workflow, run string) reflex.StreamFunc
 
 	// RespondActivityServer inserts a ActivityResponse event without wrapping it in an any.
 	RespondActivityServer(ctx context.Context, key string, message *any.Any) error
@@ -64,7 +64,7 @@ func Register(getCtx func() context.Context, cl replayClient, cstore reflex.Curs
 			return err
 		}
 
-		if key.Activity != internal.ActivitySignal {
+		if key.Target != internal.ActivitySignal {
 			return nil
 		}
 
@@ -88,7 +88,7 @@ func Register(getCtx func() context.Context, cl replayClient, cstore reflex.Curs
 	}
 
 	consumer := path.Join("replay_activity", "internal", internal.ActivitySignal)
-	spec := reflex.NewSpec(cl.Stream("*"), cstore, reflex.NewConsumer(consumer, fn))
+	spec := reflex.NewSpec(cl.Stream("", "", ""), cstore, reflex.NewConsumer(consumer, fn))
 	go rpatterns.RunForever(getCtx, spec)
 	go completeAwaitsForever(getCtx, cl, dbc)
 }

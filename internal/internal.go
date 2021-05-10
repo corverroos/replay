@@ -33,9 +33,9 @@ func (e EventType) ReflexType() int {
 //go:generate stringer -type=EventType
 
 const (
-	CreateRun   EventType = 1
-	CompleteRun EventType = 2
-	//  FailRun      EventType = 3
+	RunCreated       EventType = 1
+	RunCompleted     EventType = 2
+	RunOutput        EventType = 3
 	ActivityRequest  EventType = 4
 	ActivityResponse EventType = 5
 )
@@ -96,12 +96,12 @@ type Key struct {
 	Workflow  string
 	Run       string
 	Iteration int
-	Activity  string
+	Target    string
 	Sequence  string
 }
 
 func (k Key) Encode() string {
-	return path.Join(k.Namespace, k.Workflow, k.Run, strconv.Itoa(k.Iteration), k.Activity, k.Sequence)
+	return path.Join(k.Namespace, k.Workflow, k.Run, strconv.Itoa(k.Iteration), k.Target, k.Sequence)
 }
 
 func DecodeKey(key string) (Key, error) {
@@ -124,7 +124,7 @@ func DecodeKey(key string) (Key, error) {
 				return Key{}, err
 			}
 		} else if i == 4 {
-			k.Activity = s
+			k.Target = s
 		} else {
 			k.Sequence = s
 		}
@@ -201,7 +201,10 @@ type Client interface {
 	// RespondActivity inserts a ActivityResponse event.
 	RespondActivity(ctx context.Context, key string, message proto.Message) error
 
-	// CompleteRun inserts a RunComplete event.
+	// RespondActivity inserts a ActivityResponse event.
+	EmitOutput(ctx context.Context, key string, message proto.Message) error
+
+	// RunCompleted inserts a RunComplete event.
 	CompleteRun(ctx context.Context, key string) error
 
 	// RestartRun completes the current run iteration and start the next iteration with the provided message.

@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"database/sql"
+	"strconv"
 	"strings"
 
 	"github.com/luno/jettison/errors"
@@ -25,9 +26,42 @@ func DefaultEvents() *rsql.EventsTable {
 	)
 }
 
-// ToStream returns a reflex stream filtering only events for the namespace unless a wildcard is provided.
-func ToStream(dbc *sql.DB, events *rsql.EventsTable, namespace string) reflex.StreamFunc {
+// ToStream returns a reflex stream filtering by namespace, workflow and run if not empty.
+func ToStream(dbc *sql.DB, events *rsql.EventsTable, namespace, workflow, run string) reflex.StreamFunc {
 	return func(ctx context.Context, after string, opts ...reflex.StreamOption) (reflex.StreamClient, error) {
+
+		filterOpts := j.MKV{"namespace": namespace, "workflow": workflow, "run": run}
+		if (run != "" && workflow == "") || (workflow != "" && namespace == "") {
+			return nil, errors.New("missing filter", filterOpts)
+		}
+
+		// When starting a stream with a filter...
+		if after == "" && namespace != "" {
+			// ... bootstrap to first event matching the filter.
+			where := "type=? and namespace=?"
+			args := []interface{}{internal.RunCreated, namespace}
+			if workflow != "" {
+				where += " and workflow=?"
+				args = append(args, workflow)
+			}
+			if run != "" {
+				where += " and run=?"
+				args = append(args, run)
+			}
+
+			var id int64
+			err := dbc.QueryRowContext(ctx, "select id from replay_events where "+
+				where+" order by id asc limit 1", args...).Scan(&id)
+			if errors.Is(err, sql.ErrNoRows) {
+				// NoReturnErr: Just start from the beginning.
+				// TODO(corver): Maybe start from head-1000 or something instead of zero.
+			} else if err != nil {
+				return nil, err
+			} else {
+				after = strconv.FormatInt(id-1, 10)
+			}
+		}
+
 		cl, err := events.ToStream(dbc)(ctx, after, opts...)
 		if err != nil {
 			return nil, err
@@ -35,6 +69,8 @@ func ToStream(dbc *sql.DB, events *rsql.EventsTable, namespace string) reflex.St
 
 		return &filter{
 			namespace: namespace,
+			workflow:  workflow,
+			run:       run,
 			cl:        cl,
 		}, nil
 	}
@@ -42,6 +78,8 @@ func ToStream(dbc *sql.DB, events *rsql.EventsTable, namespace string) reflex.St
 
 type filter struct {
 	namespace string
+	workflow  string
+	run       string
 	cl        reflex.StreamClient
 }
 
@@ -62,7 +100,13 @@ func (f *filter) Recv() (*reflex.Event, error) {
 			return nil, err
 		}
 
-		if f.namespace != "*" && key.Namespace != f.namespace {
+		if f.namespace != "" && key.Namespace != f.namespace {
+			continue
+		}
+		if f.workflow != "" && key.Workflow != f.workflow {
+			continue
+		}
+		if f.run != "" && key.Run != f.run {
 			continue
 		}
 
@@ -83,7 +127,7 @@ func RestartRun(ctx context.Context, dbc *sql.DB, events *rsql.EventsTable, key 
 	defer tx.Rollback()
 
 	// Mark previous iteration as complete
-	notify1, err := insertTX(ctx, events, tx, key, internal.CompleteRun, nil)
+	notify1, err := insertTX(ctx, events, tx, key, internal.RunCompleted, nil)
 	if errors.Is(err, internal.ErrDuplicate) {
 		// NoReturnErr: Continue below
 	} else if err != nil {
@@ -94,7 +138,7 @@ func RestartRun(ctx context.Context, dbc *sql.DB, events *rsql.EventsTable, key 
 
 	// Start next iteration.
 	k.Iteration++
-	notify2, err := insertTX(ctx, events, tx, k.Encode(), internal.CreateRun, message)
+	notify2, err := insertTX(ctx, events, tx, k.Encode(), internal.RunCreated, message)
 	if errors.Is(err, internal.ErrDuplicate) {
 		// NoReturnErr: Continue below
 	} else if err != nil {
@@ -114,7 +158,7 @@ func ListBootstrapEvents(ctx context.Context, dbc *sql.DB, events *rsql.EventsTa
 
 	rows, err := dbc.QueryContext(ctx, "select id, `key`, type, timestamp, message "+
 		"from replay_events where namespace=? and workflow=? and run=? and iteration = ? and (type=? or type=? or type=?) order by id asc",
-		k.Namespace, k.Workflow, k.Run, k.Iteration, internal.CreateRun, internal.ActivityResponse, internal.CompleteRun)
+		k.Namespace, k.Workflow, k.Run, k.Iteration, internal.RunCreated, internal.ActivityResponse, internal.RunCompleted)
 	if err != nil {
 		return nil, err
 	}
@@ -191,8 +235,8 @@ func inserter(ctx context.Context, tx *sql.Tx,
 		return errors.New("workflow empty", j.KS("key", key))
 	} else if k.Run == "" && reflex.IsAnyType(typ, internal.ActivityRequest, internal.ActivityResponse) {
 		return errors.New("run empty", j.KS("key", key))
-	} else if k.Activity == "" && reflex.IsAnyType(typ, internal.ActivityRequest, internal.ActivityResponse) {
-		return errors.New("activity empty", j.KS("key", key))
+	} else if k.Target == "" && reflex.IsAnyType(typ, internal.ActivityRequest, internal.ActivityResponse, internal.RunOutput) {
+		return errors.New("target empty", j.KS("key", key))
 	} else if k.Sequence == "" && reflex.IsAnyType(typ, internal.ActivityRequest, internal.ActivityResponse) {
 		return errors.New("sequence empty", j.KS("key", key))
 	}

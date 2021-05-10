@@ -17,6 +17,7 @@ type Workflow struct {
 	Description string
 	Input       PBType
 	Signals     []Signal
+	Outputs     []Output
 }
 
 // Activity describes a parsed typedreplay.Activity instance.
@@ -33,6 +34,13 @@ type Signal struct {
 	Name        string
 	Description string
 	Enum        int
+	Message     PBType
+}
+
+// Output describes a parsed typedreplay.Output instance.
+type Output struct {
+	Name        string
+	Description string
 	Message     PBType
 }
 
@@ -68,6 +76,10 @@ func (s Signal) Camel() string {
 
 func (s Signal) Pascal() string {
 	return toPascal(s.Name)
+}
+
+func (o Output) Pascal() string {
+	return toPascal(o.Name)
 }
 
 func (t PBType) String() string {

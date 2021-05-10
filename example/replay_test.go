@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/golang/protobuf/proto"
 	"github.com/luno/fate"
 	"github.com/luno/jettison/jtest"
 	"github.com/luno/reflex"
@@ -39,7 +40,7 @@ func TestNoopWorkflow(t *testing.T) {
 		ok, err := cl.RunWorkflow(ctx, ns, w, run, new(Empty))
 		jtest.RequireNil(t, err)
 		require.True(t, ok)
-		require.Equal(t, runkey(run), <-cl.completeChan)
+		awaitComplete(t, cl, ns, w, run)
 	}
 }
 
@@ -60,8 +61,7 @@ func TestRestart(t *testing.T) {
 	ok, err := cl.RunWorkflow(ctx, ns, w, r, new(Int))
 	jtest.RequireNil(t, err)
 	require.True(t, ok)
-
-	require.Equal(t, internal.MinKey(ns, w, r, 5), <-cl.completeChan) // Restarts doesn't call Complete on client, only last exit does.
+	awaitCompletes(t, cl, ns, w, r, 5)
 
 	for i := 0; i < 5; i++ {
 		el, err := cl.Internal().ListBootstrapEvents(ctx, internal.MinKey(ns, w, r, i))
@@ -121,7 +121,6 @@ func TestWorkflowFunc(t *testing.T) {
 
 func TestActivityErr(t *testing.T) {
 	ctx, cl, _, cstore := setup(t)
-
 	var i int
 	activity := func(context.Context, Backends, fate.Fate, *Empty) (*Empty, error) {
 		i++
@@ -141,7 +140,7 @@ func TestActivityErr(t *testing.T) {
 	ok, err := cl.RunWorkflow(ctx, ns, w, r, new(Empty))
 	jtest.RequireNil(t, err)
 	require.True(t, ok)
-	require.Equal(t, runkey(r), <-cl.completeChan)
+	awaitComplete(t, cl, ns, w, r)
 	require.Equal(t, 2, i)
 
 	ok, err = cl.RunWorkflow(ctx, ns, w, r, new(Empty))
@@ -151,7 +150,6 @@ func TestActivityErr(t *testing.T) {
 
 func TestIdenticalReplay(t *testing.T) {
 	ctx, cl, _, cstore := setup(t)
-	cl.blockActivity["PrintGreeting"] = io.EOF
 
 	workflow := makeWorkflow(5)
 
@@ -159,22 +157,21 @@ func TestIdenticalReplay(t *testing.T) {
 	replay.RegisterActivity(oneCtx(t), cl, cstore, b, ns, EnrichGreeting)
 	replay.RegisterActivity(oneCtx(t), cl, cstore, b, ns, PrintGreeting)
 
-	// This workflow will block right before ctx.ExecActivity(PrintGreeting, name)
-	replay.RegisterWorkflow(oneCtx(t), cl, cstore, ns, workflow, replay.WithName(w))
-
 	_, err := cl.RunWorkflow(context.Background(), ns, w, r, &String{Value: "World"})
 	jtest.RequireNil(t, err)
 
-	require.Equal(t, "PrintGreeting", <-cl.blockedChan)
+	// This workflow will block right before ctx.ExecActivity(PrintGreeting, name)
+	bcl := newBlockingClient(cl, "PrintGreeting")
+	replay.RegisterWorkflow(oneCtx(t), bcl, cstore, ns, workflow, replay.WithName(w))
+	require.Equal(t, "PrintGreeting", <-bcl.blockedChan)
 
 	el, err := cl.Internal().ListBootstrapEvents(ctx, runkey(r))
 	jtest.RequireNil(t, err)
 	require.Len(t, el, 6)
 
-	cl2 := cl.Clone()
 	// This workflow will bootstrap and continue after ctx.ExecActivity(PrintGreeting, name)
-	replay.RegisterWorkflow(oneCtx(t), cl2, cstore, ns, workflow, replay.WithName(w))
-	require.Equal(t, runkey(r), <-cl2.completeChan)
+	replay.RegisterWorkflow(oneCtx(t), cl, cstore, ns, workflow, replay.WithName(w))
+	awaitComplete(t, cl, ns, w, r)
 
 	el, err = cl.Internal().ListBootstrapEvents(ctx, runkey(r))
 	jtest.RequireNil(t, err)
@@ -209,7 +206,7 @@ func TestEarlyCompleteReplay(t *testing.T) {
 	<-calledCh
 	cancel()
 
-	// Ensure only 1 event, CreateRun
+	// Ensure only 1 event, RunCreated
 	el, err := cl.Internal().ListBootstrapEvents(context.Background(), runkey(r))
 	jtest.RequireNil(t, err)
 	require.Len(t, el, 1)
@@ -217,12 +214,12 @@ func TestEarlyCompleteReplay(t *testing.T) {
 	// This workflow will replay the above run and just complete it immediately.
 	noop := func(ctx replay.RunContext, e *Empty) {}
 	replay.RegisterWorkflow(oneCtx(t), cl, new(test.MemCursorStore), ns, noop, replay.WithName(w))
-	require.Equal(t, runkey(r), <-cl.completeChan)
+	awaitComplete(t, cl, ns, w, r)
 
 	// Trigger above activity response (after new completion)
 	returnCh <- struct{}{}
 
-	// Wait for 3 events: CreateRun, Complete, Response
+	// Wait for 3 events: RunCreated, Complete, Response
 	require.Eventually(t, func() bool {
 		el, err = cl.Internal().ListBootstrapEvents(context.Background(), runkey(r))
 		jtest.RequireNil(t, err)
@@ -230,8 +227,8 @@ func TestEarlyCompleteReplay(t *testing.T) {
 			return false
 		}
 		require.Len(t, el, 3)
-		require.True(t, reflex.IsType(el[0].Type, internal.CreateRun))
-		require.True(t, reflex.IsType(el[1].Type, internal.CompleteRun))
+		require.True(t, reflex.IsType(el[0].Type, internal.RunCreated))
+		require.True(t, reflex.IsType(el[1].Type, internal.RunCompleted))
 		require.True(t, reflex.IsType(el[2].Type, internal.ActivityResponse))
 		return true
 	}, time.Second, time.Millisecond*10)
@@ -239,7 +236,7 @@ func TestEarlyCompleteReplay(t *testing.T) {
 	// Do another noop run, ensure it completes even though above had response after the complete.
 	_, err = cl.RunWorkflow(context.Background(), ns, w, "flush", new(Empty))
 	jtest.RequireNil(t, err)
-	require.Equal(t, runkey("flush"), <-cl.completeChan)
+	awaitComplete(t, cl, ns, w, "flush")
 
 	el, err = cl.Internal().ListBootstrapEvents(context.Background(), runkey("flush"))
 	jtest.RequireNil(t, err)
@@ -248,56 +245,53 @@ func TestEarlyCompleteReplay(t *testing.T) {
 
 func TestBootstrapComplete(t *testing.T) {
 	ctx, cl, _, cstore := setup(t)
-	cl.blockActivity["PrintGreeting"] = io.EOF
+	bcl := newBlockingClient(cl, "PrintGreeting")
 
 	workflow := makeWorkflow(5)
 
 	var b Backends
-	replay.RegisterActivity(oneCtx(t), cl, cstore, b, ns, EnrichGreeting)
-	replay.RegisterActivity(oneCtx(t), cl, cstore, b, ns, PrintGreeting)
+	replay.RegisterActivity(oneCtx(t), bcl, cstore, b, ns, EnrichGreeting)
+	replay.RegisterActivity(oneCtx(t), bcl, cstore, b, ns, PrintGreeting)
 	// This workflow will block right before ctx.ExecActivity(PrintGreeting, name)
-	replay.RegisterWorkflow(oneCtx(t), cl, cstore, ns, workflow, replay.WithName(w))
+	replay.RegisterWorkflow(oneCtx(t), bcl, cstore, ns, workflow, replay.WithName(w))
 
 	_, err := cl.RunWorkflow(context.Background(), ns, w, r, &String{Value: "World"})
 	jtest.RequireNil(t, err)
 
-	require.Equal(t, "PrintGreeting", <-cl.blockedChan)
+	require.Equal(t, "PrintGreeting", <-bcl.blockedChan)
 
 	noop := func(ctx replay.RunContext, _ *String) {}
-	cl2 := cl.Clone()
 	// This workflow will complete during bootstrap
-	replay.RegisterWorkflow(oneCtx(t), cl2, cstore, ns, noop, replay.WithName(w))
-	require.Equal(t, runkey(r), <-cl2.completeChan)
+	replay.RegisterWorkflow(oneCtx(t), cl, cstore, ns, noop, replay.WithName(w))
+	awaitComplete(t, cl, ns, w, r)
 
 	el, err := cl.Internal().ListBootstrapEvents(ctx, runkey(r))
 	jtest.RequireNil(t, err)
 	require.Len(t, el, 7) // No PrintGreeting response
-	require.True(t, reflex.IsType(el[0].Type, internal.CreateRun))
+	require.True(t, reflex.IsType(el[0].Type, internal.RunCreated))
 	require.True(t, reflex.IsType(el[1].Type, internal.ActivityResponse))
 	require.True(t, reflex.IsType(el[5].Type, internal.ActivityResponse))
-	require.True(t, reflex.IsType(el[6].Type, internal.CompleteRun))
+	require.True(t, reflex.IsType(el[6].Type, internal.RunCompleted))
 }
 
 func TestOutOfOrderResponses(t *testing.T) {
 	ctx, cl, _, cstore := setup(t)
-	cl.blockActivity["PrintGreeting"] = io.EOF
+	bcl := newBlockingClient(cl, "PrintGreeting")
 
 	var b Backends
 	replay.RegisterActivity(oneCtx(t), cl, cstore, b, ns, EnrichGreeting)
 
 	// This workflow will block right before ctx.ExecActivity(PrintGreeting, name)
-	replay.RegisterWorkflow(oneCtx(t), cl, cstore, ns, makeWorkflow(5), replay.WithName(w))
+	replay.RegisterWorkflow(oneCtx(t), bcl, cstore, ns, makeWorkflow(5), replay.WithName(w))
 
 	_, err := cl.RunWorkflow(context.Background(), ns, w, r, &String{Value: "World"})
 	jtest.RequireNil(t, err)
 
-	require.Equal(t, "PrintGreeting", <-cl.blockedChan)
-
-	cl2 := cl.Clone()
+	require.Equal(t, "PrintGreeting", <-bcl.blockedChan)
 
 	// This workflow will error during bootstrap since the activity order changed
 	errChan := make(chan struct{})
-	replay.RegisterWorkflow(oneCtx(t), cl2, cstore, ns, makeWorkflow(1), replay.WithName(w),
+	replay.RegisterWorkflow(oneCtx(t), cl, cstore, ns, makeWorkflow(1), replay.WithName(w),
 		replay.WithWorkflowMetrics(func(_, _ string) replay.Metrics {
 			return replay.Metrics{
 				IncErrors: func() {
@@ -312,7 +306,7 @@ func TestOutOfOrderResponses(t *testing.T) {
 	el, err := cl.Internal().ListBootstrapEvents(ctx, runkey(r))
 	jtest.RequireNil(t, err)
 	require.Len(t, el, 6)
-	require.True(t, reflex.IsType(el[0].Type, internal.CreateRun))
+	require.True(t, reflex.IsType(el[0].Type, internal.RunCreated))
 	require.True(t, reflex.IsType(el[5].Type, internal.ActivityResponse))
 }
 
@@ -346,16 +340,16 @@ func TestCancelCtxBootstrap(t *testing.T) {
 	jtest.RequireNil(t, err)
 	require.True(t, ok)
 
-	// Start workflows, since PrintGreeting activity consumer not running, the workflows will block
-	// awaiting PrintGreeting responses.
+	// Start run, since PrintGreeting activity consumer not running, the runs cannot
+	// complete yet.
 	tick := tickCtx{nextChan: make(chan struct{})}
 	replay.RegisterWorkflow(tick.Get, cl, cstore, ns, makeWorkflow(1), replay.WithName(w))
 	tick.Next()
 
-	// Wait until PrintGreeting requests inserted
-	sc, err := cl.Stream(ns)(ctx, "")
+	// Wait until runs active; until few activity requests inserted
+	sc, err := cl.Stream(ns, w, "")(ctx, "")
 	jtest.RequireNil(t, err)
-	for i := 0; i < 6; i++ {
+	for i := 0; i < 4; i++ {
 		_, err := sc.Recv()
 		jtest.RequireNil(t, err)
 	}
@@ -363,18 +357,18 @@ func TestCancelCtxBootstrap(t *testing.T) {
 	// Cancel the context, forcing reflex consumer to restart.
 	tick.Next()
 
-	// Now start PrintGreeting activity consumer to complete the runs.
+	// Now start PrintGreeting activity consumer and wait for runs to complete.
 	replay.RegisterActivity(oneCtx(t), cl, cstore, b, ns, PrintGreeting)
-	require.Equal(t, runkey(run1), <-cl.completeChan)
-	require.Equal(t, runkey(run2), <-cl.completeChan)
+	awaitComplete(t, cl, ns, w, run1)
+	awaitComplete(t, cl, ns, w, run2)
 
 	el, err := cl.Internal().ListBootstrapEvents(ctx, runkey(run1))
 	jtest.RequireNil(t, err)
 	require.Len(t, el, 4)
-	require.True(t, reflex.IsType(el[0].Type, internal.CreateRun))
+	require.True(t, reflex.IsType(el[0].Type, internal.RunCreated))
 	require.True(t, reflex.IsType(el[1].Type, internal.ActivityResponse))
 	require.True(t, reflex.IsType(el[2].Type, internal.ActivityResponse))
-	require.True(t, reflex.IsType(el[3].Type, internal.CompleteRun))
+	require.True(t, reflex.IsType(el[3].Type, internal.RunCompleted))
 }
 
 func TestAwaitTimeout(t *testing.T) {
@@ -394,7 +388,7 @@ func TestAwaitTimeout(t *testing.T) {
 	replay.RegisterWorkflow(oneCtx(t), cl, cstore, ns, workflow, replay.WithName(w), replay.WithAwaitTimeout(time.Millisecond))
 
 	// Wait until PrintGreeting requests inserted
-	sc, err := cl.Stream(ns)(ctx, "")
+	sc, err := cl.Stream(ns, "", "")(ctx, "")
 	jtest.RequireNil(t, err)
 	for i := 0; i < runs*2; i++ {
 		_, err := sc.Recv()
@@ -404,16 +398,16 @@ func TestAwaitTimeout(t *testing.T) {
 	// Now start PrintGreeting activity consumer to complete the runs.
 	replay.RegisterActivity(oneCtx(t), cl, cstore, Backends{}, ns, PrintGreeting)
 	for i := 0; i < runs; i++ {
-		require.Equal(t, runkey(fmt.Sprintf("run%d", i)), <-cl.completeChan)
+		awaitComplete(t, cl, ns, w, fmt.Sprintf("run%d", i))
 	}
 
 	for i := 0; i < runs; i++ {
 		el, err := cl.Internal().ListBootstrapEvents(ctx, runkey(fmt.Sprintf("run%d", i)))
 		jtest.RequireNil(t, err)
 		require.Len(t, el, 3)
-		require.True(t, reflex.IsType(el[0].Type, internal.CreateRun))
+		require.True(t, reflex.IsType(el[0].Type, internal.RunCreated))
 		require.True(t, reflex.IsType(el[1].Type, internal.ActivityResponse))
-		require.True(t, reflex.IsType(el[2].Type, internal.CompleteRun))
+		require.True(t, reflex.IsType(el[2].Type, internal.RunCompleted))
 	}
 }
 
@@ -445,9 +439,7 @@ func TestCtxCancel(t *testing.T) {
 	replay.RegisterWorkflow(fickleCtx, cl, cstore, ns, workflow, replay.WithName(w))
 
 	// Wait for all runs to complete
-	for i := 0; i < runs; i++ {
-		<-cl.completeChan
-	}
+	awaitCompletes(t, cl, ns, w, "", runs)
 }
 
 func TestShards(t *testing.T) {
@@ -472,9 +464,7 @@ func TestShards(t *testing.T) {
 	}
 
 	// Wait for all runs to complete
-	for i := 0; i < runs; i++ {
-		<-cl.completeChan
-	}
+	awaitCompletes(t, cl, ns, w, "", runs)
 }
 
 func TestReShard(t *testing.T) {
@@ -500,9 +490,7 @@ func TestReShard(t *testing.T) {
 			}
 
 			// Wait for all runs to complete (also previous subtest runs since those runs are reprocessed)
-			for i := 0; i < runs*(j+1); i++ {
-				<-cl.completeChan
-			}
+			awaitCompletes(t, cl, ns, w, "", runs*(j+1))
 		})
 	}
 }
@@ -533,26 +521,164 @@ func TestCustomShards(t *testing.T) {
 	replay.RegisterWorkflow(oneCtx(t), cl, cstore, ns, workflow, replay.WithName(w), replay.WithShard(0, shards), replay.WithShardFunc(shardFunc))
 
 	// Wait for 4 (5/20) runs to complete
-	for i := 0; i < runs/shards; i++ {
-		require.Equal(t, runkey(fmt.Sprint(i*shards)), <-cl.completeChan)
+	awaitCompletes(t, cl, ns, w, "", runs/shards)
+}
+
+func TestStream(t *testing.T) {
+	ctx, cl, _, cstore := setup(t)
+
+	// ns1
+	replay.RegisterActivity(oneCtx(t), cl, cstore, Backends{}, "ns1", EnrichGreeting)
+	replay.RegisterActivity(oneCtx(t), cl, cstore, Backends{}, "ns1", PrintGreeting)
+	replay.RegisterWorkflow(oneCtx(t), cl, cstore, "ns1", makeWorkflow(1), replay.WithName("w1"))
+
+	ok, err := cl.RunWorkflow(ctx, "ns1", "w1", "run1", &String{Value: "Hello"})
+	jtest.RequireNil(t, err)
+	require.True(t, ok)
+	awaitCompletes(t, cl, "", "", "", 1)
+
+	// ns2
+	replay.RegisterActivity(oneCtx(t), cl, cstore, Backends{}, "ns2", PrintGreeting)
+	replay.RegisterWorkflow(oneCtx(t), cl, cstore, "ns2", makeWorkflow(0), replay.WithName("w2"))
+
+	ok, err = cl.RunWorkflow(ctx, "ns2", "w2", "run2", &String{Value: "Hello"})
+	jtest.RequireNil(t, err)
+	require.True(t, ok)
+	awaitCompletes(t, cl, "", "", "", 2)
+
+	cre := internal.RunCreated.String()
+	com := internal.RunCompleted.String()
+	out := internal.RunOutput.String()
+	req := internal.ActivityRequest.String()
+	res := internal.ActivityResponse.String()
+
+	testStream := func(t *testing.T, namespace, workflow, run string, types ...string) {
+		t.Helper()
+		sc, err := cl.Stream(namespace, workflow, run)(ctx, "", reflex.WithStreamToHead())
+		jtest.RequireNil(t, err)
+
+		checkArgs := func(n, w, r string) {
+			if namespace != "" {
+				require.Equal(t, namespace, n)
+			}
+			if workflow != "" {
+				require.Equal(t, workflow, w)
+			}
+			if run != "" {
+				require.Equal(t, run, r)
+			}
+		}
+
+		for i, typ := range types {
+			e, err := sc.Recv()
+			jtest.RequireNil(t, err)
+
+			err = replay.Handle(e,
+				replay.HandleRunCreated(func(n, w, r string) error {
+					checkArgs(n, w, r)
+					require.Equal(t, typ, cre, i)
+					return nil
+				}),
+				replay.HandleRunCompleted(func(n, w, r string) error {
+					checkArgs(n, w, r)
+					require.Equal(t, typ, com, i)
+					return nil
+				}),
+				replay.HandleOutput(func(n, w, r, o string, msg proto.Message) error {
+					require.Equal(t, "output", o)
+					require.Equal(t, "output", msg.(*String).Value)
+					checkArgs(n, w, r)
+					require.Equal(t, typ, out, i)
+					return nil
+				}),
+				replay.HandleActivityRequest(func(n, w, r, a string, msg proto.Message) error {
+					_, ok := msg.(*String)
+					require.True(t, ok, i)
+					checkArgs(n, w, r)
+					require.Equal(t, typ, req, i)
+					return nil
+				}),
+				replay.HandleActivityResponse(func(n, w, r, a string, msg proto.Message) error {
+					if a == "EnrichGreeting" {
+						_, ok := msg.(*String)
+						require.True(t, ok, i)
+					} else /* a == "PrintGreeting" */ {
+						_, ok := msg.(*Empty)
+						require.True(t, ok, i)
+					}
+					checkArgs(n, w, r)
+					require.Equal(t, typ, res, i)
+					return nil
+				}),
+			)
+			jtest.RequireNil(t, err)
+		}
+
+		_, err = sc.Recv()
+		require.Equal(t, err, reflex.ErrHeadReached)
+	}
+
+	tl1 := []string{cre, req, res, req, res, out, com}
+	testStream(t, "ns1", "w1", "run1", tl1...)
+	testStream(t, "ns1", "w1", "", tl1...)
+	testStream(t, "ns1", "", "", tl1...)
+
+	tl2 := []string{cre, req, res, out, com}
+	testStream(t, "ns2", "w2", "run2", tl2...)
+
+	testStream(t, "", "", "", append(tl1, tl2...)...)
+}
+
+func awaitComplete(t *testing.T, cl replay.Client, namespace, workflow, run string) {
+	awaitCompletes(t, cl, namespace, workflow, run, 1)
+}
+
+func awaitCompletes(t *testing.T, cl replay.Client, namespace, workflow, run string, count int) {
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second*time.Duration(count))
+	defer cancel()
+
+	sc, err := cl.Stream(namespace, workflow, run)(ctx, "")
+	jtest.RequireNil(t, err)
+
+	for {
+		e, err := sc.Recv()
+		if err == context.DeadlineExceeded {
+			require.Fail(t, "timeout: complete(s) not received", "remaining=%d", count)
+		}
+		jtest.RequireNil(t, err)
+
+		err = replay.Handle(e, replay.HandleRunCompleted(func(n, w, r string) error {
+			if namespace != "" && namespace != n {
+				require.Fail(t, "unexpected namespace")
+			}
+			if workflow != "" && workflow != w {
+				require.Fail(t, "unexpected workflow")
+			}
+			if run != "" && run != r {
+				require.Fail(t, "unexpected run")
+			}
+
+			if count--; count == 0 {
+				return io.EOF
+			}
+
+			return nil
+		}))
+		if err == io.EOF {
+			return
+		}
+		jtest.RequireNil(t, err)
 	}
 }
 
-func setup(t *testing.T, opts ...rsql.EventsOption) (context.Context, *testClient, *sql.DB, *test.MemCursorStore) {
+func setup(t *testing.T, opts ...rsql.EventsOption) (context.Context, replay.Client, *sql.DB, *test.MemCursorStore) {
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 
 	cl, dbc := test.Setup(t, opts...)
 
-	tcl := &testClient{
-		Client:        cl.Internal(),
-		cl:            cl,
-		completeChan:  make(chan string),
-		blockedChan:   make(chan string),
-		blockActivity: make(map[string]error),
-	}
-
-	return ctx, tcl, dbc, new(test.MemCursorStore)
+	return ctx, cl, dbc, new(test.MemCursorStore)
 }
 
 // makeWorkflow returns a workflow for testing.
@@ -563,6 +689,7 @@ func makeWorkflow(n int) func(ctx replay.RunContext, name *String) {
 			name = ctx.ExecActivity(EnrichGreeting, name).(*String)
 		}
 		ctx.ExecActivity(PrintGreeting, name)
+		ctx.EmitOutput("output", &String{Value: "output"})
 	}
 }
 
@@ -588,4 +715,56 @@ func (t *tickCtx) Next() {
 // runkey returns a common default run key used in testing.
 func runkey(run string) string {
 	return internal.MinKey(ns, w, run, 0)
+}
+
+func newBlockingClient(cl replay.Client, activities ...string) *blockingClient {
+	m := make(map[string]bool)
+	for _, activity := range activities {
+		m[activity] = true
+	}
+	return &blockingClient{
+		Client:        cl.Internal(),
+		cl:            cl,
+		blockedChan:   make(chan string),
+		blockActivity: m,
+	}
+}
+
+// blockingClient wraps a replay client blocking runs from doing a
+// specific activity request, blockchan is notified on each block.
+type blockingClient struct {
+	internal.Client
+	cl            replay.Client
+	blockedChan   chan string
+	blockActivity map[string]bool
+}
+
+func (c *blockingClient) RunWorkflow(ctx context.Context, namespace, workflow, run string, message proto.Message) (bool, error) {
+	return c.cl.RunWorkflow(ctx, namespace, workflow, run, message)
+}
+
+func (c *blockingClient) SignalRun(ctx context.Context, namespace, workflow, run string, s replay.Signal, message proto.Message, extID string) (bool, error) {
+	return c.cl.SignalRun(ctx, namespace, workflow, run, s, message, extID)
+}
+
+func (c *blockingClient) Stream(namespace, workflow, run string) reflex.StreamFunc {
+	return c.cl.Stream(namespace, workflow, run)
+}
+
+func (c *blockingClient) Internal() internal.Client {
+	return c
+}
+
+func (c *blockingClient) RequestActivity(ctx context.Context, key string, args proto.Message) error {
+	k, err := internal.DecodeKey(key)
+	if err != nil {
+		return err
+	}
+
+	if ok := c.blockActivity[k.Target]; ok {
+		c.blockedChan <- k.Target
+		time.Sleep(time.Hour)
+	}
+
+	return c.Client.RequestActivity(ctx, key, args)
 }

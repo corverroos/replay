@@ -8,31 +8,21 @@ func _() {
 	// An "invalid array index" compiler error signifies that the constant values have changed.
 	// Re-run the stringer command to generate them again.
 	var x [1]struct{}
-	_ = x[CreateRun-1]
-	_ = x[CompleteRun-2]
+	_ = x[RunCreated-1]
+	_ = x[RunCompleted-2]
+	_ = x[RunOutput-3]
 	_ = x[ActivityRequest-4]
 	_ = x[ActivityResponse-5]
 }
 
-const (
-	_EventType_name_0 = "CreateRunCompleteRun"
-	_EventType_name_1 = "ActivityRequestActivityResponse"
-)
+const _EventType_name = "RunCreatedRunCompletedRunOutputActivityRequestActivityResponse"
 
-var (
-	_EventType_index_0 = [...]uint8{0, 9, 20}
-	_EventType_index_1 = [...]uint8{0, 15, 31}
-)
+var _EventType_index = [...]uint8{0, 10, 22, 31, 46, 62}
 
 func (i EventType) String() string {
-	switch {
-	case 1 <= i && i <= 2:
-		i -= 1
-		return _EventType_name_0[_EventType_index_0[i]:_EventType_index_0[i+1]]
-	case 4 <= i && i <= 5:
-		i -= 4
-		return _EventType_name_1[_EventType_index_1[i]:_EventType_index_1[i+1]]
-	default:
-		return "EventType(" + strconv.FormatInt(int64(i), 10) + ")"
+	i -= 1
+	if i < 0 || i >= EventType(len(_EventType_index)-1) {
+		return "EventType(" + strconv.FormatInt(int64(i+1), 10) + ")"
 	}
+	return _EventType_name[_EventType_index[i]:_EventType_index[i+1]]
 }

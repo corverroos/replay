@@ -14,11 +14,14 @@ import (
 )
 
 const (
-	_ns   = "example"
-	_wFoo = "foo"
-	_wBar = "bar"
-	_aA   = "a"
-	_aB   = "b"
+	_ns     = "example"
+	_wFoo   = "foo"
+	_oFooO1 = "o1"
+	_oFooO2 = "o2"
+	_wBar   = "bar"
+	_oBarO3 = "o3"
+	_aA     = "a"
+	_aB     = "b"
 )
 
 type fooSignal int
@@ -122,6 +125,12 @@ type fooFlow interface {
 	// AwaitS2 blocks and returns true when a s2 signal is/was
 	// received for this run. If no signal is/was received it returns false after d duration.
 	AwaitS2(d time.Duration) (*Int, bool)
+
+	// EmitO1 stores the o1 output in the event log and returns when successful.
+	EmitO1(message *Int)
+
+	// EmitO2 stores the o2 output in the event log and returns when successful.
+	EmitO2(message *String)
 }
 
 type fooFlowImpl struct {
@@ -172,6 +181,61 @@ func (f fooFlowImpl) AwaitS2(d time.Duration) (*Int, bool) {
 	return res.(*Int), true
 }
 
+func (f fooFlowImpl) EmitO1(message *Int) {
+	f.ctx.EmitOutput(_oFooO1, message)
+}
+
+func (f fooFlowImpl) EmitO2(message *String) {
+	f.ctx.EmitOutput(_oFooO2, message)
+}
+
+// StreamFoo returns a stream of replay events for the foo workflow and an optional run.
+func StreamFoo(cl replay.Client, run string) reflex.StreamFunc {
+	return cl.Stream(_ns, _wFoo, run)
+}
+
+// HandleO1 calls fn and returns true if the event is a o1 output.
+// Use StreamFoo to provide the events.
+func HandleO1(e *reflex.Event, fn func(run string, message *Int) error) (bool, error) {
+	var ok bool
+	err := replay.Handle(e,
+		replay.HandleSkip(func(namespace, workflow, run string) bool {
+			return namespace != _ns || workflow != _wFoo
+		}),
+		replay.HandleOutput(func(namespace, workflow, run string, output string, message proto.Message) error {
+			if output != _oFooO1 {
+				return nil
+			}
+			ok = true
+			return fn(run, message.(*Int))
+		}))
+	if err != nil {
+		return false, err
+	}
+	return ok, nil
+}
+
+// HandleO2 calls fn and returns true if the event is a o2 output.
+// Use StreamFoo to provide the events.
+func HandleO2(e *reflex.Event, fn func(run string, message *String) error) (bool, error) {
+	var ok bool
+	err := replay.Handle(e,
+		replay.HandleSkip(func(namespace, workflow, run string) bool {
+			return namespace != _ns || workflow != _wFoo
+		}),
+		replay.HandleOutput(func(namespace, workflow, run string, output string, message proto.Message) error {
+			if output != _oFooO2 {
+				return nil
+			}
+			ok = true
+			return fn(run, message.(*String))
+		}))
+	if err != nil {
+		return false, err
+	}
+	return ok, nil
+}
+
 // barFlow defines a typed API for the bar workflow.
 type barFlow interface {
 
@@ -203,6 +267,9 @@ type barFlow interface {
 	// ActivityB results in the ActivityB activity being called asynchronously
 	// with the provided parameter and returns the response once available.
 	ActivityB(message *String) *Empty
+
+	// EmitO3 stores the o3 output in the event log and returns when successful.
+	EmitO3(message *Int)
 }
 
 type barFlowImpl struct {
@@ -235,4 +302,34 @@ func (f barFlowImpl) ActivityA(message *Empty) *String {
 
 func (f barFlowImpl) ActivityB(message *String) *Empty {
 	return f.ctx.ExecActivity(ActivityB, message, replay.WithName(_aB)).(*Empty)
+}
+
+func (f barFlowImpl) EmitO3(message *Int) {
+	f.ctx.EmitOutput(_oBarO3, message)
+}
+
+// StreamBar returns a stream of replay events for the bar workflow and an optional run.
+func StreamBar(cl replay.Client, run string) reflex.StreamFunc {
+	return cl.Stream(_ns, _wBar, run)
+}
+
+// HandleO3 calls fn and returns true if the event is a o3 output.
+// Use StreamBar to provide the events.
+func HandleO3(e *reflex.Event, fn func(run string, message *Int) error) (bool, error) {
+	var ok bool
+	err := replay.Handle(e,
+		replay.HandleSkip(func(namespace, workflow, run string) bool {
+			return namespace != _ns || workflow != _wBar
+		}),
+		replay.HandleOutput(func(namespace, workflow, run string, output string, message proto.Message) error {
+			if output != _oBarO3 {
+				return nil
+			}
+			ok = true
+			return fn(run, message.(*Int))
+		}))
+	if err != nil {
+		return false, err
+	}
+	return ok, nil
 }

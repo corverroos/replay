@@ -60,11 +60,29 @@ var _ = typedreplay.Namespace{
 					Message:     new(Int),
 				},
 			},
+			Outputs: []typedreplay.Output{
+				{
+					Name:        "o1",
+					Description: "Published int output values",
+					Message:     new(Int),
+				}, {
+					Name:        "o2",
+					Description: "Published string output values",
+					Message:     new(String),
+				},
+			},
 		},
 		{
 			Name:        "bar",
 			Description: "Bar is bar",
 			Input:       new(Empty),
+			Outputs: []typedreplay.Output{
+				{
+					Name:        "o3",
+					Description: "Published int output values",
+					Message:     new(Int),
+				},
+			},
 		},
 	},
 	Activities: []typedreplay.Activity{

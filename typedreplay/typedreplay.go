@@ -6,7 +6,7 @@ import "github.com/golang/protobuf/proto"
 
 // Activity defines an activity.
 type Activity struct {
-	// Name of the activity.
+	// Name of the activity. This may never change.
 	Name string
 
 	// Description of the activity.
@@ -31,6 +31,18 @@ type Signal struct {
 	Message proto.Message
 }
 
+// Output defines a workflow output.
+type Output struct {
+	// Name of the signal. This may never change.
+	Name string
+
+	// Description of the signal.
+	Description string
+
+	// Message is the protobuf message of the output. This may never change.
+	Message proto.Message
+}
+
 // Workflow defines a workflow to generate.
 type Workflow struct {
 	// Name of the workflow. This may never change.
@@ -44,6 +56,8 @@ type Workflow struct {
 
 	// Signals of the workflow. Signals are activities, so they may also only be appended to workflow logic.
 	Signals []Signal
+
+	Outputs []Output
 }
 
 // Namespace groups workflows and activities.

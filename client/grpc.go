@@ -75,7 +75,7 @@ func (c *Client) RequestActivity(ctx context.Context, key string, message proto.
 		return err
 	}
 
-	_, err = c.clpb.RequestActivity(ctx, &pb.ActivityMessage{
+	_, err = c.clpb.RequestActivity(ctx, &pb.KeyMessage{
 		Key:     key,
 		Message: anyMsg,
 	})
@@ -88,7 +88,20 @@ func (c *Client) RespondActivity(ctx context.Context, key string, message proto.
 		return err
 	}
 
-	_, err = c.clpb.RespondActivity(ctx, &pb.ActivityMessage{
+	_, err = c.clpb.RespondActivity(ctx, &pb.KeyMessage{
+		Key:     key,
+		Message: anyMsg,
+	})
+	return err
+}
+
+func (c *Client) EmitOutput(ctx context.Context, key string, message proto.Message) error {
+	anyMsg, err := internal.ToAny(message)
+	if err != nil {
+		return err
+	}
+
+	_, err = c.clpb.EmitOutput(ctx, &pb.KeyMessage{
 		Key:     key,
 		Message: anyMsg,
 	})
@@ -136,12 +149,14 @@ func (c *Client) ListBootstrapEvents(ctx context.Context, key string) ([]reflex.
 	return res, nil
 }
 
-func (c *Client) Stream(namespace string) reflex.StreamFunc {
+func (c *Client) Stream(namespace, workflow, run string) reflex.StreamFunc {
 
 	return reflex.WrapStreamPB(func(ctx context.Context, req *reflexpb.StreamRequest) (reflex.StreamClientPB, error) {
 		return c.clpb.Stream(ctx, &pb.StreamRequest{
-			Namespace: namespace,
 			Req:       req,
+			Namespace: namespace,
+			Workflow:  workflow,
+			Run:       run,
 		})
 	})
 }
