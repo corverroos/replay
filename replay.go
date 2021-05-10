@@ -305,6 +305,7 @@ func (s *wcState) StartRun(ctx context.Context, e *reflex.Event, key internal.Ke
 	s.runs[key.Run] = rs
 
 	go func() {
+		ctx = log.ContextWith(ctx, j.KS("replay_run", key.Run))
 		defer func() {
 			if v := recover(); v != nil {
 				if err, ok := v.(error); !ok {
