@@ -353,13 +353,14 @@ func (s *wcState) bootstrapRun(ctx context.Context, run string, iter int, upTo i
 		return false, errors.Wrap(err, "list responses")
 	}
 
-	for _, e := range el {
+	for i, e := range el {
 		if reflex.IsType(e.Type, internal.RunCompleted) {
-			// Complete event in bootstrap list means logic changed
-			// and the run already completed before a previously requested
-			// activity's response.
-			// Ignore events after complete by skipping bootstrap.
-			log.Error(ctx, errors.New("not bootstrapping completed run"))
+			// Run already completed, do not bootstrap.
+			if i != len(el)-1 {
+				// Complete event in middle of bootstrap list means logic changed
+				log.Error(ctx, errors.New("completed run ignoring activity response", j.KS("key", e.ForeignID)))
+			}
+
 			return false, nil
 		}
 	}

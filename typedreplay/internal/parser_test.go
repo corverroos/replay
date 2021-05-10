@@ -18,7 +18,7 @@ func TestParse(t *testing.T) {
 
 	goldie.New(t, goldie.WithNameSuffix(".json")).AssertJson(t, "namespace", namespace)
 
-	b, err := Render(namespace, true)
+	b, err := Render(namespace, "testdata/replay_gen.go", true)
 	jtest.RequireNil(t, err)
 
 	goldie.New(t, goldie.WithNameSuffix(".go")).Assert(t, "replay_gen", b)

@@ -10,13 +10,14 @@ import (
 
 	"github.com/luno/jettison/errors"
 	"github.com/luno/jettison/j"
+	"golang.org/x/tools/imports"
 )
 
 //go:embed template.go.tpl
 
 var tpl []byte
 
-func Render(ns Namespace, debug bool) ([]byte, error) {
+func Render(ns Namespace, filename string, debug bool) ([]byte, error) {
 	funcMap := template.FuncMap{
 		"inc": func(i int) int {
 			return i + 1
@@ -40,6 +41,14 @@ func Render(ns Namespace, debug bool) ([]byte, error) {
 			return buf.Bytes(), nil
 		}
 		return nil, errors.Wrap(err, "gofmt fail (maybe try with -debug=true)")
+	}
+
+	src, err = imports.Process(filename, src, &imports.Options{Comments: true})
+	if err != nil {
+		if debug {
+			return buf.Bytes(), nil
+		}
+		return nil, errors.Wrap(err, "imports failed (maybe try with -debug=true)")
 	}
 
 	return src, nil

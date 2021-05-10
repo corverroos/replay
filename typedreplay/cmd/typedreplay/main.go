@@ -3,7 +3,6 @@ package main
 import (
 	"flag"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"path"
 
@@ -38,11 +37,13 @@ func run(debug bool) error {
 		return err
 	}
 
+	filename := path.Join(pwd, "replay_gen.go")
+
 	fmt.Printf("Generating replay_gen.go with a typed API for namespace %s with %d workflows", ns.Name, len(ns.Workflows))
-	src, err := internal.Render(ns, debug)
+	src, err := internal.Render(ns, filename, debug)
 	if err != nil {
 		return err
 	}
 
-	return ioutil.WriteFile(path.Join(pwd, "replay_gen.go"), src, 0644)
+	return os.WriteFile(filename, src, 0644)
 }
