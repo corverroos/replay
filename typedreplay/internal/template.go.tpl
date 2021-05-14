@@ -95,8 +95,13 @@ type {{.Camel}}Flow interface {
 	CreateEvent() *reflex.Event
 
 	// LastEvent returns the latest reflex event (type is either internal.CreateRun or internal.ActivityResponse).
-    // The event timestamp could be used to reason about run age.
+    // The event timestamp could be used to reason about run liveliness.
 	LastEvent() *reflex.Event
+
+    // Now returns the last event timestamp as the deterministic "current" time.
+    // It is assumed the first time this is used in logic it will be very close to correct while
+    // producing deterministic logic during bootstrapping.
+	Now() time.Time
 
 	// Run returns the run name/identifier.
 	Run() string
@@ -140,6 +145,10 @@ func (f {{.Camel}}FlowImpl) LastEvent() *reflex.Event {
 	return f.ctx.LastEvent()
 }
 
+func (f {{.Camel}}FlowImpl) Now() time.Time {
+	return f.ctx.LastEvent().Timestamp
+}
+
 func (f {{.Camel}}FlowImpl) Run() string {
 	return f.ctx.Run()
 }
@@ -176,11 +185,10 @@ func Stream{{.Pascal}}(cl replay.Client, run string) reflex.StreamFunc {
 }
 
 {{range .Outputs}}
-// Handle{{.Pascal}} calls fn and returns true if the event is a {{.Name}} output.
+// Handle{{.Pascal}} calls fn if the event is a {{.Name}} output.
 // Use Stream{{$workflowPascal}} to provide the events.
-func Handle{{.Pascal}}(e *reflex.Event, fn func(run string, message *{{.Message}}) error) (bool, error){
-	var ok bool
-	err := replay.Handle(e,
+func Handle{{.Pascal}}(e *reflex.Event, fn func(run string, message *{{.Message}}) error) error{
+	return replay.Handle(e,
 		replay.HandleSkip(func(namespace, workflow, run string) bool {
 			return namespace != _ns || workflow != _w{{$workflowPascal}}
 		}),
@@ -188,13 +196,9 @@ func Handle{{.Pascal}}(e *reflex.Event, fn func(run string, message *{{.Message}
 			if output != _o{{$workflowPascal}}{{.Pascal}} {
 				return nil
 			}
-			ok = true
 			return fn(run, message.(*{{.Message}}))
-		}))
-	if err != nil {
-		return false, err
-	}
-	return ok, nil
+		}),
+	)
 }
 {{end}}
 

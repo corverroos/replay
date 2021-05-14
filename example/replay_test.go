@@ -635,10 +635,7 @@ func awaitComplete(t *testing.T, cl replay.Client, namespace, workflow, run stri
 
 func awaitCompletes(t *testing.T, cl replay.Client, namespace, workflow, run string, count int) {
 
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second*time.Duration(count))
-	defer cancel()
-
-	sc, err := cl.Stream(namespace, workflow, run)(ctx, "")
+	sc, err := cl.Stream(namespace, workflow, run)(context.Background(), "")
 	jtest.RequireNil(t, err)
 
 	for {

@@ -307,24 +307,24 @@ func (s *wcState) StartRun(ctx context.Context, e *reflex.Event, key internal.Ke
 	s.runs[key.Run] = rs
 
 	go func() {
-		ctx = log.ContextWith(ctx, j.KS("replay_run", key.Run))
+		rctx := log.ContextWith(ctx, j.KS("replay_run", key.Run))
 		defer func() {
 			if v := recover(); v != nil {
 				if err, ok := v.(error); !ok {
-					log.Error(ctx, errors.New("run panic", j.MKS{"key": key.Encode(), "panic": fmt.Sprint(v)}))
+					log.Error(rctx, errors.New("run panic", j.MKS{"key": key.Encode(), "panic": fmt.Sprint(v)}))
 					rs.ackChan <- ack{panic: true}
 				} else if errors.Is(err, errCtxCancel) {
-					logDebug(ctx, "run context cancelled", log.WithError(err))
+					logDebug(rctx, "run context cancelled", log.WithError(err))
 					rs.ackChan <- ack{cancel: true} // NoReturnErr: Return via ack
 				} else if errors.Is(err, errRestart) {
-					logDebug(ctx, "run restarted", j.KS("key", key.Encode()))
+					logDebug(rctx, "run restarted", j.KS("key", key.Encode()))
 					rs.ackChan <- ack{complete: true} // NoReturnErr: Return via ack
 				} else {
-					log.Error(ctx, errors.Wrap(err, "unexpected panic error"))
+					log.Error(rctx, errors.Wrap(err, "unexpected panic error"))
 					rs.ackChan <- ack{panic: true} // NoReturnErr: Return via ack
 				}
 			} else {
-				logDebug(ctx, "run completed", j.KS("key", key.Encode()))
+				logDebug(rctx, "run completed", j.KS("key", key.Encode()))
 				rs.ackChan <- ack{complete: true}
 			}
 
@@ -333,10 +333,10 @@ func (s *wcState) StartRun(ctx context.Context, e *reflex.Event, key internal.Ke
 			s.Unlock()
 		}()
 
-		s.run(ctx, e, key.Run, key.Iteration, message, rs)
+		s.run(rctx, e, key.Run, key.Iteration, message, rs)
 
-		ensure(ctx, func() error {
-			return s.cl.CompleteRun(ctx, internal.MinKey(s.namespace, s.workflow, key.Run, key.Iteration))
+		ensure(rctx, func() error {
+			return s.cl.CompleteRun(rctx, internal.MinKey(s.namespace, s.workflow, key.Run, key.Iteration))
 		})
 
 		s.metrics.IncComplete(time.Since(e.Timestamp))

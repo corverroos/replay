@@ -98,8 +98,13 @@ type fooFlow interface {
 	CreateEvent() *reflex.Event
 
 	// LastEvent returns the latest reflex event (type is either internal.CreateRun or internal.ActivityResponse).
-	// The event timestamp could be used to reason about run age.
+	// The event timestamp could be used to reason about run liveliness.
 	LastEvent() *reflex.Event
+
+	// Now returns the last event timestamp as the deterministic "current" time.
+	// It is assumed the first time this is used in logic it will be very close to correct while
+	// producing deterministic logic during bootstrapping.
+	Now() time.Time
 
 	// Run returns the run name/identifier.
 	Run() string
@@ -148,6 +153,10 @@ func (f fooFlowImpl) LastEvent() *reflex.Event {
 	return f.ctx.LastEvent()
 }
 
+func (f fooFlowImpl) Now() time.Time {
+	return f.ctx.LastEvent().Timestamp
+}
+
 func (f fooFlowImpl) Run() string {
 	return f.ctx.Run()
 }
@@ -193,11 +202,10 @@ func StreamFoo(cl replay.Client, run string) reflex.StreamFunc {
 	return cl.Stream(_ns, _wFoo, run)
 }
 
-// HandleO1 calls fn and returns true if the event is a o1 output.
+// HandleO1 calls fn if the event is a o1 output.
 // Use StreamFoo to provide the events.
-func HandleO1(e *reflex.Event, fn func(run string, message *Int) error) (bool, error) {
-	var ok bool
-	err := replay.Handle(e,
+func HandleO1(e *reflex.Event, fn func(run string, message *Int) error) error {
+	return replay.Handle(e,
 		replay.HandleSkip(func(namespace, workflow, run string) bool {
 			return namespace != _ns || workflow != _wFoo
 		}),
@@ -205,20 +213,15 @@ func HandleO1(e *reflex.Event, fn func(run string, message *Int) error) (bool, e
 			if output != _oFooO1 {
 				return nil
 			}
-			ok = true
 			return fn(run, message.(*Int))
-		}))
-	if err != nil {
-		return false, err
-	}
-	return ok, nil
+		}),
+	)
 }
 
-// HandleO2 calls fn and returns true if the event is a o2 output.
+// HandleO2 calls fn if the event is a o2 output.
 // Use StreamFoo to provide the events.
-func HandleO2(e *reflex.Event, fn func(run string, message *String) error) (bool, error) {
-	var ok bool
-	err := replay.Handle(e,
+func HandleO2(e *reflex.Event, fn func(run string, message *String) error) error {
+	return replay.Handle(e,
 		replay.HandleSkip(func(namespace, workflow, run string) bool {
 			return namespace != _ns || workflow != _wFoo
 		}),
@@ -226,13 +229,9 @@ func HandleO2(e *reflex.Event, fn func(run string, message *String) error) (bool
 			if output != _oFooO2 {
 				return nil
 			}
-			ok = true
 			return fn(run, message.(*String))
-		}))
-	if err != nil {
-		return false, err
-	}
-	return ok, nil
+		}),
+	)
 }
 
 // barFlow defines a typed API for the bar workflow.
@@ -248,8 +247,13 @@ type barFlow interface {
 	CreateEvent() *reflex.Event
 
 	// LastEvent returns the latest reflex event (type is either internal.CreateRun or internal.ActivityResponse).
-	// The event timestamp could be used to reason about run age.
+	// The event timestamp could be used to reason about run liveliness.
 	LastEvent() *reflex.Event
+
+	// Now returns the last event timestamp as the deterministic "current" time.
+	// It is assumed the first time this is used in logic it will be very close to correct while
+	// producing deterministic logic during bootstrapping.
+	Now() time.Time
 
 	// Run returns the run name/identifier.
 	Run() string
@@ -287,6 +291,10 @@ func (f barFlowImpl) LastEvent() *reflex.Event {
 	return f.ctx.LastEvent()
 }
 
+func (f barFlowImpl) Now() time.Time {
+	return f.ctx.LastEvent().Timestamp
+}
+
 func (f barFlowImpl) Run() string {
 	return f.ctx.Run()
 }
@@ -312,11 +320,10 @@ func StreamBar(cl replay.Client, run string) reflex.StreamFunc {
 	return cl.Stream(_ns, _wBar, run)
 }
 
-// HandleO3 calls fn and returns true if the event is a o3 output.
+// HandleO3 calls fn if the event is a o3 output.
 // Use StreamBar to provide the events.
-func HandleO3(e *reflex.Event, fn func(run string, message *Int) error) (bool, error) {
-	var ok bool
-	err := replay.Handle(e,
+func HandleO3(e *reflex.Event, fn func(run string, message *Int) error) error {
+	return replay.Handle(e,
 		replay.HandleSkip(func(namespace, workflow, run string) bool {
 			return namespace != _ns || workflow != _wBar
 		}),
@@ -324,11 +331,7 @@ func HandleO3(e *reflex.Event, fn func(run string, message *Int) error) (bool, e
 			if output != _oBarO3 {
 				return nil
 			}
-			ok = true
 			return fn(run, message.(*Int))
-		}))
-	if err != nil {
-		return false, err
-	}
-	return ok, nil
+		}),
+	)
 }

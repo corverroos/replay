@@ -31,6 +31,8 @@ github.com/census-instrumentation/opencensus-proto v0.2.1/go.mod h1:f6KPmirojxKA
 github.com/client9/misspell v0.3.4/go.mod h1:qj6jICC3Q7zFZvVWo7KLAzC3yx5G7kyvSDkc90ppPyw=
 github.com/corverroos/truss v0.0.0-20210325092544-7695147a5970 h1:VY6csVAjHxFXH+WxGOmKCGLra69bKi5Z18SHPOyiJiw=
 github.com/corverroos/truss v0.0.0-20210325092544-7695147a5970/go.mod h1:A7bhl0W5AgpM1Q6nI72q1JMQhk1vnse/UA0+Nj2ngLQ=
+github.com/corverroos/truss v0.0.0-20210514115035-9e5e1b0851a9 h1:NMcmq9Y8hV7r67YGUqQjUU4ri+S6MxyDLRXaT2ptr58=
+github.com/corverroos/truss v0.0.0-20210514115035-9e5e1b0851a9/go.mod h1:A7bhl0W5AgpM1Q6nI72q1JMQhk1vnse/UA0+Nj2ngLQ=
 github.com/dave/dst v0.23.1/go.mod h1:LjPcLEauK4jC5hQ1fE/wr05O41zK91Pr4Qs22Ljq7gs=
 github.com/dave/gopackages v0.0.0-20170318123100-46e7023ec56e/go.mod h1:i00+b/gKdIDIxuLDFob7ustLAVqhsZRk2qVZrArELGQ=
 github.com/dave/jennifer v1.2.0/go.mod h1:fIb+770HOpJ2fmN9EPPKOqm1vMGhB+TwXKMZhrIygKg=
