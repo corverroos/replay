@@ -26,7 +26,12 @@ func Handle(e *reflex.Event, handlers ...func(*handler)) error {
 	}
 
 	if reflex.IsType(e.Type, internal.RunCreated) && h.RunCreated != nil {
-		return h.RunCreated(key.Namespace, key.Workflow, key.Run)
+		msg, err := internal.ParseMessage(e)
+		if err != nil {
+			return err
+		}
+
+		return h.RunCreated(key.Namespace, key.Workflow, key.Run, msg)
 	}
 
 	if reflex.IsType(e.Type, internal.RunCompleted) && h.RunCompleted != nil {
@@ -77,7 +82,7 @@ func HandleOutput(fn func(namespace, workflow, run string, output string, messag
 }
 
 // HandleRunCreated returns a handler option to consume run created events.
-func HandleRunCreated(fn func(namespace, workflow, run string) error) func(*handler) {
+func HandleRunCreated(fn func(namespace, workflow, run string, message proto.Message) error) func(*handler) {
 	return func(h *handler) {
 		h.RunCreated = fn
 	}
@@ -106,7 +111,7 @@ func HandleActivityResponse(fn func(namespace, workflow, run string, activity st
 
 type handler struct {
 	Skip             func(namespace, workflow, run string) bool
-	RunCreated       func(namespace, workflow, run string) error
+	RunCreated       func(namespace, workflow, run string, message proto.Message) error
 	RunCompleted     func(namespace, workflow, run string) error
 	RunOutput        func(namespace, workflow, run string, output string, message proto.Message) error
 	ActivityRequest  func(namespace, workflow, run string, activity string, message proto.Message) error
