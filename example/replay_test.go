@@ -323,6 +323,18 @@ func TestDuplicateSignals(t *testing.T) {
 	}
 }
 
+func TestUniqSignals(t *testing.T) {
+	ctx, cl, _, _ := setup(t)
+
+	ok, err := cl.SignalRun(ctx, ns, w, r, testsig{}, new(Int), "")
+	jtest.RequireNil(t, err)
+	require.True(t, ok)
+
+	ok, err = cl.SignalRun(ctx, ns, w, r, testsig2{}, new(Int), "")
+	jtest.RequireNil(t, err)
+	require.True(t, ok)
+}
+
 func TestCancelCtxBootstrap(t *testing.T) {
 	ctx, cl, _, cstore := setup(t)
 	run1 := "run1"
@@ -574,7 +586,8 @@ func TestStream(t *testing.T) {
 			jtest.RequireNil(t, err)
 
 			err = replay.Handle(e,
-				replay.HandleRunCreated(func(n, w, r string) error {
+				replay.HandleRunCreated(func(n, w, r string, msg proto.Message) error {
+					require.Equal(t, "Hello", msg.(*String).Value)
 					checkArgs(n, w, r)
 					require.Equal(t, typ, cre, i)
 					return nil

@@ -104,7 +104,12 @@ func Insert(ctx context.Context, dbc *sql.DB, namespace, workflow, run string, s
 	_, _ = h.Write([]byte(namespace))
 	_, _ = h.Write([]byte(workflow))
 	_, _ = h.Write([]byte(run))
-	_ = binary.Write(h, binary.BigEndian, signalType)
+
+	err = binary.Write(h, binary.BigEndian, int32(signalType))
+	if err != nil {
+		return err
+	}
+
 	_, _ = h.Write([]byte(externalID))
 	hash := h.Sum(nil)
 

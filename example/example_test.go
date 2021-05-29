@@ -145,6 +145,16 @@ func (s testsig) MessageType() proto.Message {
 	return &Int{}
 }
 
+type testsig2 struct{}
+
+func (s testsig2) SignalType() int {
+	return 2
+}
+
+func (s testsig2) MessageType() proto.Message {
+	return &Int{}
+}
+
 // oneCtx returns a getCtx function that only returns a single context. It blocks on subsequent calls.
 func oneCtx(t *testing.T) func() context.Context {
 	var n int
