@@ -202,6 +202,19 @@ func StreamFoo(cl replay.Client, run string) reflex.StreamFunc {
 	return cl.Stream(_ns, _wFoo, run)
 }
 
+// HandleFooRun calls fn if the event is a foo RunCreated event.
+// Use StreamFoo to provide the events.
+func HandleFooRun(e *reflex.Event, fn func(run string, message *String) error) error {
+	return replay.Handle(e,
+		replay.HandleSkip(func(namespace, workflow, run string) bool {
+			return namespace != _ns || workflow != _wFoo
+		}),
+		replay.HandleRunCreated(func(namespace, workflow, run string, message proto.Message) error {
+			return fn(run, message.(*String))
+		}),
+	)
+}
+
 // HandleO1 calls fn if the event is a o1 output.
 // Use StreamFoo to provide the events.
 func HandleO1(e *reflex.Event, fn func(run string, message *Int) error) error {
@@ -318,6 +331,19 @@ func (f barFlowImpl) EmitO3(message *Int) {
 // StreamBar returns a stream of replay events for the bar workflow and an optional run.
 func StreamBar(cl replay.Client, run string) reflex.StreamFunc {
 	return cl.Stream(_ns, _wBar, run)
+}
+
+// HandleBarRun calls fn if the event is a bar RunCreated event.
+// Use StreamBar to provide the events.
+func HandleBarRun(e *reflex.Event, fn func(run string, message *Empty) error) error {
+	return replay.Handle(e,
+		replay.HandleSkip(func(namespace, workflow, run string) bool {
+			return namespace != _ns || workflow != _wBar
+		}),
+		replay.HandleRunCreated(func(namespace, workflow, run string, message proto.Message) error {
+			return fn(run, message.(*Empty))
+		}),
+	)
 }
 
 // HandleO3 calls fn if the event is a o3 output.

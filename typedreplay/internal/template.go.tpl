@@ -184,6 +184,19 @@ func Stream{{.Pascal}}(cl replay.Client, run string) reflex.StreamFunc {
 	return cl.Stream(_ns, _w{{.Pascal}}, run)
 }
 
+// Handle{{.Pascal}}Run calls fn if the event is a {{.Name}} RunCreated event.
+// Use Stream{{.Pascal}} to provide the events.
+func Handle{{.Pascal}}Run(e *reflex.Event, fn func(run string, message *{{.Input}}) error) error{
+	return replay.Handle(e,
+		replay.HandleSkip(func(namespace, workflow, run string) bool {
+			return namespace != _ns || workflow != _w{{.Pascal}}
+		}),
+		replay.HandleRunCreated(func(namespace, workflow, run string, message proto.Message) error {
+			return fn(run, message.(*{{.Input}}))
+		}),
+	)
+}
+
 {{range .Outputs}}
 // Handle{{.Pascal}} calls fn if the event is a {{.Name}} output.
 // Use Stream{{$workflowPascal}} to provide the events.
