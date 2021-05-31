@@ -5,9 +5,11 @@ package client
 
 import (
 	"context"
+	"strings"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/luno/jettison/errors"
+	"github.com/luno/jettison/j"
 	"github.com/luno/reflex"
 	"github.com/luno/reflex/reflexpb"
 	"google.golang.org/grpc"
@@ -26,6 +28,10 @@ type Client struct {
 }
 
 func (c *Client) RunWorkflow(ctx context.Context, namespace, workflow, run string, message proto.Message) (bool, error) {
+	if err := validateNames(namespace, workflow, run); err != nil {
+		return false, err
+	}
+
 	anyMsg, err := internal.ToAny(message)
 	if err != nil {
 		return false, err
@@ -46,6 +52,10 @@ func (c *Client) RunWorkflow(ctx context.Context, namespace, workflow, run strin
 }
 
 func (c *Client) SignalRun(ctx context.Context, namespace, workflow, run string, s replay.Signal, message proto.Message, extID string) (bool, error) {
+	if err := validateNames(namespace, workflow, run); err != nil {
+		return false, err
+	}
+
 	anyMsg, err := internal.ToAny(message)
 	if err != nil {
 		return false, err
@@ -150,7 +160,6 @@ func (c *Client) ListBootstrapEvents(ctx context.Context, key string) ([]reflex.
 }
 
 func (c *Client) Stream(namespace, workflow, run string) reflex.StreamFunc {
-
 	return reflex.WrapStreamPB(func(ctx context.Context, req *reflexpb.StreamRequest) (reflex.StreamClientPB, error) {
 		return c.clpb.Stream(ctx, &pb.StreamRequest{
 			Req:       req,
@@ -163,4 +172,18 @@ func (c *Client) Stream(namespace, workflow, run string) reflex.StreamFunc {
 
 func (c *Client) Internal() internal.Client {
 	return c
+}
+
+func validateNames(names ...string) error {
+	for _, name := range names {
+		if name == "" {
+			return errors.New("replay names may not be empty")
+		}
+
+		if strings.Contains(name, "/") {
+			return errors.New("replay names may not contain '/'", j.KS("name", name))
+		}
+	}
+
+	return nil
 }

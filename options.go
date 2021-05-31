@@ -1,6 +1,10 @@
 package replay
 
-import "time"
+import (
+	"time"
+
+	"github.com/luno/reflex"
+)
 
 type options struct {
 	shardM, shardN  int
@@ -9,6 +13,7 @@ type options struct {
 	workflowMetrics func(namespace, workflow string) Metrics
 	activityMetrics func(namespace, activity string) Metrics
 	awaitTimeout    time.Duration
+	consumerOpts    []reflex.ConsumerOption
 }
 
 type option func(*options)
@@ -86,6 +91,15 @@ func WithActivityMetrics(m func(namespace, activity string) Metrics) option {
 	}
 }
 
+// WithConsumerOpts returns an option to define custom reflex consumer options.
+// It overrides the default options that specify reflex.WithoutConsumerActivityTTL.
+// This function only applies to RegisterActivity and RegisterWorkflow.
+func WithConsumerOpts(opts ...reflex.ConsumerOption) option {
+	return func(o *options) {
+		o.consumerOpts = opts
+	}
+}
+
 type Metrics struct {
 	IncErrors   func()
 	IncStart    func()
@@ -97,6 +111,7 @@ func defaultOptions() options {
 		shardFunc:    defaultShardFunc,
 		nameFunc:     getFunctionName,
 		awaitTimeout: time.Hour,
+		consumerOpts: []reflex.ConsumerOption{reflex.WithoutConsumerActivityTTL()},
 		workflowMetrics: func(namespace, workflow string) Metrics {
 			return Metrics{
 				IncErrors: workflowErrors.WithLabelValues(namespace, workflow).Inc,

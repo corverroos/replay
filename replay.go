@@ -132,8 +132,9 @@ func RegisterActivity(getCtx func() context.Context, cl Client, cstore reflex.Cu
 		return cl.Internal().RespondActivity(ctx, e.ForeignID, respVals[0].Interface().(proto.Message))
 	}
 
-	consumer := path.Join("replay_activity", namespace, activity, shardSuffix(o))
-	spec := reflex.NewSpec(cl.Stream(namespace, "", ""), cstore, reflex.NewConsumer(consumer, fn))
+	name := path.Join("replay_activity", namespace, activity, shardSuffix(o))
+	consumer := reflex.NewConsumer(name, fn, o.consumerOpts...)
+	spec := reflex.NewSpec(cl.Stream(namespace, "", ""), cstore, consumer)
 	go rpatterns.RunForever(getCtx, spec)
 }
 
@@ -204,8 +205,9 @@ func RegisterWorkflow(getCtx func() context.Context, cl Client, cstore reflex.Cu
 		}
 	}
 
-	consumer := path.Join("replay_workflow", namespace, workflow, shardSuffix(o))
-	spec := reflex.NewSpec(cl.Stream(namespace, workflow, ""), cstore, reflex.NewConsumer(consumer, fn))
+	name := path.Join("replay_workflow", namespace, workflow, shardSuffix(o))
+	consumer := reflex.NewConsumer(name, fn, o.consumerOpts...)
+	spec := reflex.NewSpec(cl.Stream(namespace, workflow, ""), cstore, consumer)
 	go rpatterns.RunForever(getCtx, spec)
 }
 
@@ -360,7 +362,6 @@ func (s *wcState) bootstrapRun(ctx context.Context, run string, iter int, upTo i
 				// Complete event in middle of bootstrap list means logic changed
 				log.Error(ctx, errors.New("completed run ignoring activity response", j.KS("key", e.ForeignID)))
 			}
-
 			return false, nil
 		}
 	}
@@ -445,7 +446,10 @@ func (s *wcState) RespondActivity(ctx context.Context, e *reflex.Event, key inte
 		// Since there is a delay after the run goroutine acks that it is waiting for a response
 		// and before it blocks receiving on the response channel, we allow it some time to get there.
 		//
-		// Run goroutine not waiting, expect an error
+		// Run goroutine not waiting, expect an error, then back off and try again.
+		//
+		// Note that run goroutines timeout while waiting, so there is always a probability that these errors
+		// can occur. Maybe add support to handle it gracefully without an error.
 		expectErr = true
 	case rs.resChan <- response{key: key, message: message, event: e}:
 	}

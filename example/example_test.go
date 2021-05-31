@@ -38,7 +38,7 @@ func TestExampleSleep(t *testing.T) {
 	ctx, cl, dbc, cstore := setup(t)
 
 	b := Backends{Replay: cl}
-	test.RegisterNoopSleeps(ctx, cl, cstore, dbc)
+	test.RegisterNoopSleeps(testCtx(t), cl, cstore, dbc)
 	replay.RegisterActivity(oneCtx(t), cl, cstore, b, "ns", PrintGreeting)
 	replay.RegisterWorkflow(oneCtx(t), cl, cstore, "ns", SleepWorkflow)
 
@@ -54,7 +54,7 @@ func TestExampleSignal(t *testing.T) {
 
 	b := Backends{Replay: cl}
 
-	test.RegisterNoSleepSignals(ctx, cl.(*server.DBClient), cstore, dbc)
+	test.RegisterNoSleepSignals(testCtx(t), cl.(*server.DBClient), cstore, dbc)
 	replay.RegisterActivity(oneCtx(t), cl, cstore, b, "ns", MaybeSignal)
 	replay.RegisterActivity(oneCtx(t), cl, cstore, b, "ns", PrintGreeting)
 	replay.RegisterWorkflow(oneCtx(t), cl, cstore, "ns", SignalWorkflow)
@@ -145,14 +145,16 @@ func (s testsig) MessageType() proto.Message {
 	return &Int{}
 }
 
-type testsig2 struct{}
-
-func (s testsig2) SignalType() int {
-	return 2
-}
-
-func (s testsig2) MessageType() proto.Message {
-	return &Int{}
+// testCtx returns a getCtx function that returns a context until the end of the test. It blocks on subsequent calls.
+func testCtx(t *testing.T) func() context.Context {
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	return func() context.Context {
+		if ctx.Err() != nil {
+			time.Sleep(time.Hour)
+		}
+		return ctx
+	}
 }
 
 // oneCtx returns a getCtx function that only returns a single context. It blocks on subsequent calls.

@@ -58,7 +58,9 @@ func newServer(t *testing.T, cl *server.DBClient) (*server.Server, string) {
 
 	grpcServer := grpc.NewServer()
 
-	srv := server.New(cl)
+	srv := server.NewServer(func(_ string) (*server.DBClient, error) {
+		return cl, nil
+	})
 
 	pb.RegisterReplayServer(grpcServer, srv)
 

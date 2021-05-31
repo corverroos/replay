@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/luno/reflex"
 	"github.com/luno/reflex/rsql"
@@ -19,16 +20,22 @@ import (
 func Setup(t *testing.T, opts ...rsql.EventsOption) (*server.DBClient, *sql.DB) {
 	dbc := db.ConnectForTesting(t)
 	cl := server.NewDBClient(dbc, opts...)
-	db.FillGaps(dbc, cl.Events())
+
+	// Start gap fillers only, not signal/sleep activities.
+	cl.StartLoops(func() context.Context {
+		time.Sleep(time.Hour)
+		panic("do not start sleep/signal loops")
+	}, nil, "")
+
 	return cl, dbc
 }
 
-func RegisterNoopSleeps(ctx context.Context, cl replay.Client, cstore reflex.CursorStore, dbc *sql.DB) {
-	sleep.RegisterForTesting(ctx, cl, cstore, dbc)
+func RegisterNoopSleeps(getCtx func() context.Context, cl replay.Client, cstore reflex.CursorStore, dbc *sql.DB) {
+	sleep.RegisterForTesting(getCtx, cl, cstore, dbc)
 }
 
-func RegisterNoSleepSignals(ctx context.Context, cl *server.DBClient, cstore reflex.CursorStore, dbc *sql.DB) {
-	signal.RegisterForTesting(ctx, cl, cstore, dbc)
+func RegisterNoSleepSignals(getCtx func() context.Context, cl *server.DBClient, cstore reflex.CursorStore, dbc *sql.DB) {
+	signal.RegisterForTesting(getCtx, cl, cstore, dbc)
 }
 
 type MemCursorStore struct {

@@ -323,6 +323,16 @@ func TestDuplicateSignals(t *testing.T) {
 	}
 }
 
+type testsig2 struct{}
+
+func (s testsig2) SignalType() int {
+	return 2
+}
+
+func (s testsig2) MessageType() proto.Message {
+	return &Int{}
+}
+
 func TestUniqSignals(t *testing.T) {
 	ctx, cl, _, _ := setup(t)
 
@@ -397,7 +407,10 @@ func TestAwaitTimeout(t *testing.T) {
 	}
 
 	// We did not start activity consumers, the run goroutines should timeout when awaiting.
-	replay.RegisterWorkflow(oneCtx(t), cl, cstore, ns, workflow, replay.WithName(w), replay.WithAwaitTimeout(time.Millisecond))
+	// TODO(corver): This test flaps when the timeout below happens during RespondActivity
+	//  which causes the workflow consumer to error and the test to timeout. This is expected
+	//  behaviour and not a problem. The test is just not robust.
+	replay.RegisterWorkflow(oneCtx(t), cl, cstore, ns, workflow, replay.WithName(w), replay.WithAwaitTimeout(10*time.Millisecond))
 
 	// Wait until PrintGreeting requests inserted
 	sc, err := cl.Stream(ns, "", "")(ctx, "")
@@ -427,7 +440,7 @@ func TestCtxCancel(t *testing.T) {
 	ctx, cl, _, cstore := setup(t, rsql.WithEventsBackoff(time.Millisecond*10))
 
 	workflow := makeWorkflow(10)
-	runs := 10
+	runs := 5
 	timeout := time.Millisecond * 100
 
 	// Create the runs
@@ -647,7 +660,6 @@ func awaitComplete(t *testing.T, cl replay.Client, namespace, workflow, run stri
 }
 
 func awaitCompletes(t *testing.T, cl replay.Client, namespace, workflow, run string, count int) {
-
 	sc, err := cl.Stream(namespace, workflow, run)(context.Background(), "")
 	jtest.RequireNil(t, err)
 

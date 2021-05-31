@@ -85,7 +85,7 @@ See these test file for examples:
 
 Build to typedreplay tool with:
 ```
-go install github.com/corverroos/replay/replaygen/cmd/replaygen
+go install github.com/corverroos/replay/typedreplay/cmd/typedreplay
 ```
 
 ## Under the hood

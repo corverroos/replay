@@ -45,15 +45,15 @@ const (
 	AwaitSuccess AwaitStatus = 3
 )
 
-func RegisterForTesting(ctx context.Context, cl replayClient, cstore reflex.CursorStore, dbc *sql.DB) {
-	pollPeriod = time.Millisecond * 100
+func RegisterForTesting(getCtx func() context.Context, cl replayClient, cstore reflex.CursorStore, dbc *sql.DB) {
+	pollPeriod = time.Millisecond * 10
 	shouldComplete = func(completeAt time.Time) bool {
 		return true
 	}
-	Register(func() context.Context { return ctx }, cl, cstore, dbc)
+	Register(getCtx, cl, cstore, dbc, "")
 }
 
-func Register(getCtx func() context.Context, cl replayClient, cstore reflex.CursorStore, dbc *sql.DB) {
+func Register(getCtx func() context.Context, cl replayClient, cstore reflex.CursorStore, dbc *sql.DB, cursorPrefix string) {
 	fn := func(ctx context.Context, f fate.Fate, e *reflex.Event) error {
 		if !reflex.IsType(e.Type, internal.ActivityRequest) {
 			return nil
@@ -87,8 +87,9 @@ func Register(getCtx func() context.Context, cl replayClient, cstore reflex.Curs
 		return nil
 	}
 
-	consumer := path.Join("replay_activity", "internal", internal.ActivitySignal)
-	spec := reflex.NewSpec(cl.Stream("", "", ""), cstore, reflex.NewConsumer(consumer, fn))
+	name := path.Join(cursorPrefix, "replay_activity", "internal", internal.ActivitySignal)
+	consumer := reflex.NewConsumer(name, fn, reflex.WithoutConsumerActivityTTL())
+	spec := reflex.NewSpec(cl.Stream("", "", ""), cstore, consumer)
 	go rpatterns.RunForever(getCtx, spec)
 	go completeAwaitsForever(getCtx, cl, dbc)
 }

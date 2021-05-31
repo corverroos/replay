@@ -3,10 +3,12 @@ package server
 import (
 	"context"
 	"database/sql"
+	"strings"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/golang/protobuf/ptypes/any"
 	"github.com/luno/jettison/errors"
+	"github.com/luno/jettison/j"
 	"github.com/luno/reflex"
 	"github.com/luno/reflex/rsql"
 
@@ -14,6 +16,7 @@ import (
 	"github.com/corverroos/replay/internal"
 	"github.com/corverroos/replay/internal/db"
 	"github.com/corverroos/replay/internal/signal"
+	"github.com/corverroos/replay/internal/sleep"
 )
 
 var _ replay.Client = (*DBClient)(nil)
@@ -35,11 +38,18 @@ type DBClient struct {
 	events *rsql.EventsTable
 }
 
-func (c *DBClient) Events() *rsql.EventsTable {
-	return c.events
+// StartLoops starts server-side background loops.
+func (c *DBClient) StartLoops(getCtx func() context.Context, cstore reflex.CursorStore, cursorPrefix string) {
+	sleep.Register(getCtx, c, cstore, c.dbc, cursorPrefix)
+	signal.Register(getCtx, c, cstore, c.dbc, cursorPrefix)
+	db.FillGaps(c.dbc, c.events)
 }
 
 func (c *DBClient) RunWorkflow(ctx context.Context, namespace, workflow, run string, message proto.Message) (bool, error) {
+	if err := validateNames(namespace, workflow, run); err != nil {
+		return false, err
+	}
+
 	apb, err := internal.ToAny(message)
 	if err != nil {
 		return false, err
@@ -79,6 +89,10 @@ func (c *DBClient) emitOutputServer(ctx context.Context, key string, message *an
 }
 
 func (c *DBClient) SignalRun(ctx context.Context, namespace, workflow, run string, s replay.Signal, message proto.Message, extID string) (bool, error) {
+	if err := validateNames(namespace, workflow, run); err != nil {
+		return false, err
+	}
+
 	apb, err := internal.ToAny(message)
 	if err != nil {
 		return false, err
@@ -174,4 +188,18 @@ func swallowErrDup(err error) (bool, error) {
 		return false, err
 	}
 	return true, nil
+}
+
+func validateNames(names ...string) error {
+	for _, name := range names {
+		if name == "" {
+			return errors.New("replay names may not be empty")
+		}
+
+		if strings.Contains(name, "/") {
+			return errors.New("replay names may not contain '/'", j.KS("name", name))
+		}
+	}
+
+	return nil
 }
