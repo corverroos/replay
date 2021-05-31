@@ -4,11 +4,12 @@ import "strings"
 
 // Namespace describes a replay namespace to generate.
 type Namespace struct {
-	PackageName string
-	Name        string
-	Workflows   []Workflow
-	Activities  []Activity
-	Imports     map[string]string
+	PackageName     string
+	Name            string
+	Workflows       []Workflow
+	Activities      []Activity
+	Imports         map[string]string
+	ExposeRegisters bool
 }
 
 // Workflow describes a parsed typedreplay.Workflow instance.

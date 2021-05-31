@@ -16,11 +16,12 @@ type options struct {
 	consumerOpts    []reflex.ConsumerOption
 }
 
-type option func(*options)
+// Option defines a functional option to configure workflow and activity consumers.
+type Option func(*options)
 
 // WithName returns an option to explicitly define a workflow or activity name.
 // Default behavior infers function names via reflection.
-func WithName(name string) option {
+func WithName(name string) Option {
 	return func(o *options) {
 		o.nameFunc = func(_ interface{}) string {
 			return name
@@ -41,7 +42,7 @@ func WithName(name string) option {
 //
 // Sharding is disabled by default, which is similar to 1-of-1 sharding.
 // See also WithShardFunc.
-func WithShard(m, n int) option {
+func WithShard(m, n int) Option {
 	return func(o *options) {
 		o.shardM = m
 		o.shardN = n
@@ -53,7 +54,7 @@ func WithShard(m, n int) option {
 //
 // Note that sharding needs to be enabled via WithShard.
 // Note also that all m-of-n shards need to use the same deterministic shard function.
-func WithShardFunc(fn func(n int, run string) (m int)) option {
+func WithShardFunc(fn func(n int, run string) (m int)) Option {
 	return func(o *options) {
 		o.shardFunc = fn
 	}
@@ -66,7 +67,7 @@ func WithShardFunc(fn func(n int, run string) (m int)) option {
 // for long sleeps.
 //
 // This function only applies to RegisterWorkflow.
-func WithAwaitTimeout(d time.Duration) option {
+func WithAwaitTimeout(d time.Duration) Option {
 	return func(o *options) {
 		o.awaitTimeout = d
 	}
@@ -76,7 +77,7 @@ func WithAwaitTimeout(d time.Duration) option {
 // It overrides the default prometheus metrics.
 //
 // This function only applies to RegisterWorkflow.
-func WithWorkflowMetrics(m func(namespace, workflow string) Metrics) option {
+func WithWorkflowMetrics(m func(namespace, workflow string) Metrics) Option {
 	return func(o *options) {
 		o.workflowMetrics = m
 	}
@@ -85,7 +86,7 @@ func WithWorkflowMetrics(m func(namespace, workflow string) Metrics) option {
 // WithActivityMetrics returns an option to define activity metrics.
 // It overrides the default prometheus metrics.
 // This function only applies to RegisterActivity and IncStart is not used.
-func WithActivityMetrics(m func(namespace, activity string) Metrics) option {
+func WithActivityMetrics(m func(namespace, activity string) Metrics) Option {
 	return func(o *options) {
 		o.activityMetrics = m
 	}
@@ -94,7 +95,7 @@ func WithActivityMetrics(m func(namespace, activity string) Metrics) option {
 // WithConsumerOpts returns an option to define custom reflex consumer options.
 // It overrides the default options that specify reflex.WithoutConsumerActivityTTL.
 // This function only applies to RegisterActivity and RegisterWorkflow.
-func WithConsumerOpts(opts ...reflex.ConsumerOption) option {
+func WithConsumerOpts(opts ...reflex.ConsumerOption) Option {
 	return func(o *options) {
 		o.consumerOpts = opts
 	}

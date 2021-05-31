@@ -4,16 +4,38 @@ package typedreplay
 
 import "github.com/golang/protobuf/proto"
 
-// Activity defines an activity.
-type Activity struct {
-	// Name of the activity. This may never change.
+// Namespace groups workflows and activities.
+type Namespace struct {
+	// Name of the namespace. This may never change.
 	Name string
 
-	// Description of the activity.
+	// Workflows of the namespace.
+	Workflows []Workflow
+
+	// Activities of the namespace.
+	Activities []Activity
+
+	// ExposeRegisterFuncs generates exported Register functions for all workflows and activities
+	// as opposed to the default single startReplayLoops function. This allows more control over
+	// the how and where the workflow and activity consumers are executed.
+	ExposeRegisterFuncs bool
+}
+
+// Workflow defines a workflow to generate.
+type Workflow struct {
+	// Name of the workflow. This may never change.
+	Name string
+
+	// Description of the workflow.
 	Description string
 
-	// Func is the activity function.
-	Func interface{}
+	// Input is the input parameter proto type. This may never change.
+	Input proto.Message
+
+	// Signals of the workflow. Signals are activities, so they may also only be appended to workflow logic.
+	Signals []Signal
+
+	Outputs []Output
 }
 
 // Signal defines a signal.
@@ -43,31 +65,14 @@ type Output struct {
 	Message proto.Message
 }
 
-// Workflow defines a workflow to generate.
-type Workflow struct {
-	// Name of the workflow. This may never change.
+// Activity defines an activity.
+type Activity struct {
+	// Name of the activity. This may never change.
 	Name string
 
-	// Description of the workflow.
+	// Description of the activity.
 	Description string
 
-	// Input is the input parameter proto type. This may never change.
-	Input proto.Message
-
-	// Signals of the workflow. Signals are activities, so they may also only be appended to workflow logic.
-	Signals []Signal
-
-	Outputs []Output
-}
-
-// Namespace groups workflows and activities.
-type Namespace struct {
-	// Name of the namespace. This may never change.
-	Name string
-
-	// Workflows of the namespace.
-	Workflows []Workflow
-
-	// Activities of the namespace.
-	Activities []Activity
+	// Func is the activity function.
+	Func interface{}
 }

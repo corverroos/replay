@@ -1,0 +1,33 @@
+{
+  "PackageName": "expose",
+  "Name": "example",
+  "Workflows": [
+    {
+      "Name": "foo",
+      "Description": "This is an example foo workflow",
+      "Input": {
+        "Package": "testdata",
+        "Name": "Empty"
+      },
+      "Signals": null,
+      "Outputs": null
+    }
+  ],
+  "Activities": [
+    {
+      "Name": "a",
+      "Description": "Processes stuff",
+      "FuncName": "ActivityA",
+      "Input": {
+        "Package": "testdata",
+        "Name": "Empty"
+      },
+      "Output": {
+        "Package": "testdata",
+        "Name": "String"
+      }
+    }
+  ],
+  "Imports": null,
+  "ExposeRegisters": true
+}

@@ -10,7 +10,7 @@ import (
 
 //go:generate go test -update
 
-func TestParse(t *testing.T) {
+func TestParse1(t *testing.T) {
 	namespace, err := Parse("testdata/replay.go")
 	jtest.RequireNil(t, err)
 
@@ -22,6 +22,20 @@ func TestParse(t *testing.T) {
 	jtest.RequireNil(t, err)
 
 	goldie.New(t, goldie.WithNameSuffix(".go")).Assert(t, "replay_gen", b)
+}
+
+func TestParse2(t *testing.T) {
+	namespace, err := Parse("testdata/expose/replay.go")
+	jtest.RequireNil(t, err)
+
+	jtest.RequireNil(t, Validate(namespace))
+
+	goldie.New(t, goldie.WithFixtureDir("testdata/expose"), goldie.WithNameSuffix(".json")).AssertJson(t, "namespace", namespace)
+
+	b, err := Render(namespace, "testdata/expose/replay_gen.go", true)
+	jtest.RequireNil(t, err)
+
+	goldie.New(t, goldie.WithFixtureDir("testdata/expose"), goldie.WithNameSuffix(".go")).Assert(t, "replay_gen", b)
 }
 
 func TestCamelSnake(t *testing.T) {

@@ -65,6 +65,31 @@ func Run{{$workflowPascal}}(ctx context.Context, cl replay.Client, run string, m
 }
 {{- end}}
 
+{{if .ExposeRegisters}}
+{{range .Workflows}}
+// Register{{.Pascal}} registers and starts the {{.Name}} workflow consumer.
+func Register{{.Pascal}}(getCtx func() context.Context, cl replay.Client, cstore reflex.CursorStore,
+    {{.Camel}} func({{.Camel}}Flow, *{{.Input}}), opts ...replay.Option) {
+
+    {{.Camel}}Func := func(ctx replay.RunContext, message *{{.Input}}) {
+        {{.Camel}}({{.Camel}}FlowImpl{ctx}, message)
+    }
+
+    copied := append([]replay.Option{replay.WithName(_w{{.Pascal}})}, opts...)
+
+    replay.RegisterWorkflow(getCtx, cl, cstore, _ns, {{.Camel}}Func, copied...)
+}
+{{end}}
+{{range .Activities}}
+// Register{{.Pascal}} registers and starts the {{.FuncName}} activity consumer.
+func Register{{.Pascal}}(getCtx func() context.Context, cl replay.Client, cstore reflex.CursorStore, b Backends, opts ...replay.Option) {
+
+    copied := append([]replay.Option{replay.WithName(_a{{.Pascal}})}, opts...)
+
+    replay.RegisterActivity(getCtx, cl, cstore, b, _ns, {{.FuncName}}, copied...)
+}
+{{end}}
+{{else}}
 // startReplayLoops registers the workflow and activities for typed workflow functions.
 func startReplayLoops(getCtx func() context.Context, cl replay.Client, cstore reflex.CursorStore, b Backends,
     {{range .Workflows}} {{.Camel}} func({{.Camel}}Flow, *{{.Input}}), {{end}} ){
@@ -80,6 +105,7 @@ func startReplayLoops(getCtx func() context.Context, cl replay.Client, cstore re
 	replay.RegisterActivity(getCtx, cl, cstore, b, _ns, {{.FuncName}}, replay.WithName(_a{{.Pascal}}))
 	{{- end}}
 }
+{{end}}
 
 {{$al := .Activities}}
 {{- range .Workflows}} {{$workflowCamel := .Camel}} {{$workflowPascal := .Pascal}}

@@ -73,7 +73,7 @@ type Signal interface {
 }
 
 // RegisterActivity starts a activity consumer that consumes replay events and executes the activity if requested.
-func RegisterActivity(getCtx func() context.Context, cl Client, cstore reflex.CursorStore, backends interface{}, namespace string, activityFunc interface{}, opts ...option) {
+func RegisterActivity(getCtx func() context.Context, cl Client, cstore reflex.CursorStore, backends interface{}, namespace string, activityFunc interface{}, opts ...Option) {
 	if err := validateActivity(activityFunc); err != nil {
 		panic(err)
 	}
@@ -140,7 +140,7 @@ func RegisterActivity(getCtx func() context.Context, cl Client, cstore reflex.Cu
 
 // RegisterWorkflow starts a workflow consumer that consumes replay events and executes the workflow.
 // It maintains a goroutine for each run when started or when an activity response is received.
-func RegisterWorkflow(getCtx func() context.Context, cl Client, cstore reflex.CursorStore, namespace string, workflowFunc interface{}, opts ...option) {
+func RegisterWorkflow(getCtx func() context.Context, cl Client, cstore reflex.CursorStore, namespace string, workflowFunc interface{}, opts ...Option) {
 	if err := validateWorkflow(workflowFunc); err != nil {
 		panic(err)
 	}
@@ -522,7 +522,7 @@ type RunContext struct {
 
 // Restart completes the current run iteration and start the next iteration with the provided message.
 func (c *RunContext) Restart(message proto.Message) {
-	// TODO(corver): Maybe add option to drain signals.
+	// TODO(corver): Maybe add Option to drain signals.
 	ensure(c, func() error {
 		return c.cl.RestartRun(c, internal.MinKey(c.namespace, c.workflow, c.run, c.iter), message)
 	})
@@ -532,7 +532,7 @@ func (c *RunContext) Restart(message proto.Message) {
 
 // ExecActivity results in the activity being called asynchronously
 // with the provided parameter and returns the response once available.
-func (c *RunContext) ExecActivity(activityFunc interface{}, message proto.Message, opts ...option) proto.Message {
+func (c *RunContext) ExecActivity(activityFunc interface{}, message proto.Message, opts ...Option) proto.Message {
 	if err := validateActivity(activityFunc); err != nil {
 		panic(err)
 	}

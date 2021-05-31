@@ -96,5 +96,6 @@
       }
     }
   ],
-  "Imports": null
+  "Imports": null,
+  "ExposeRegisters": false
 }

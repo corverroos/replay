@@ -81,6 +81,11 @@ func parseNamespace(fset *token.FileSet, cl *ast.CompositeLit, pkgName string) (
 			if err != nil {
 				return Namespace{}, errors.Wrap(err, "activities")
 			}
+		case "ExposeRegisterFuncs":
+			res.ExposeRegisters, err = parseLiteralBool(kv.Value)
+			if err != nil {
+				return Namespace{}, errors.Wrap(err, "expose register")
+			}
 		default:
 			return Namespace{}, errors.New("unknown field", j.KS("field", gofmt(fset, kv.Key)))
 		}
@@ -409,6 +414,14 @@ func parseInt(ex ast.Expr) (int, error) {
 		return 0, errors.New("int not int literal")
 	}
 	return strconv.Atoi(strings.Trim(bl.Value, "\""))
+}
+
+func parseLiteralBool(ex ast.Expr) (bool, error) {
+	id, ok := ex.(*ast.Ident)
+	if !ok {
+		return false, errors.New("not a bool literal")
+	}
+	return strconv.ParseBool(id.Name)
 }
 
 func parseType(ex ast.Expr) (PBType, error) {
