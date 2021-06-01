@@ -1,14 +1,17 @@
 package replay
 
 import (
+	"fmt"
+	"hash/fnv"
 	"time"
 
+	"github.com/dgryski/go-jump"
 	"github.com/luno/reflex"
 )
 
 type options struct {
-	shardM, shardN  int
-	shardFunc       func(n int, run string) (m int)
+	shardName       string
+	shardFunc       func(run string) bool
 	nameFunc        func(fn interface{}) string
 	workflowMetrics func(namespace, workflow string) Metrics
 	activityMetrics func(namespace, activity string) Metrics
@@ -29,35 +32,38 @@ func WithName(name string) Option {
 	}
 }
 
-// WithShard returns an option to only consume a subset of all runs (a shard).
-// The subset is defined by runs consistently hashing onto the mth of n shards.
+// WithShard returns an option for a workflow or activity consumer to only consume
+// a subset of all runs (a shard). The subset is defined by the shard functioning
+// returning true. The shard name is added to the reflex cursor name to uniquely
+// identity each shard.
 //
-// Note that all m-of-n shards must be registered independently and that n should
-// not be changed since the cursors are tied to it. However since replay is
-// deterministic and idempotent, resetting the consumer cursors by changing n
-// should only result in an initial delay (and load spike) as the newly sharded
-// consumers reprocess all runs and activities.
+// Note that all shards must be registered independently and that the shard func
+// should be deterministic and may never change. However since replay is
+// deterministic and idempotent, resharding the consumer by changing the
+// shard func and the name should only result in an initial delay
+// (and load spike) as the newly sharded consumers reprocess all runs and activities.
 //
 // Note that each activity and each workflow can be sharded separately.
 //
-// Sharding is disabled by default, which is similar to 1-of-1 sharding.
-// See also WithShardFunc.
-func WithShard(m, n int) Option {
+// Sharding is disabled by default, which is similar to a 1-of-1 WithHashedShard.
+func WithShard(name string, fn func(run string) bool) Option {
 	return func(o *options) {
-		o.shardM = m
-		o.shardN = n
+		o.shardName = name
+		o.shardFunc = fn
 	}
 }
 
-// WithShardFunc returns an option to override the default shard function
-// which uses Google's Jump Consistent Hash with the fnv64a hash of the run as its key.
-//
-// Note that sharding needs to be enabled via WithShard.
-// Note also that all m-of-n shards need to use the same deterministic shard function.
-func WithShardFunc(fn func(n int, run string) (m int)) Option {
-	return func(o *options) {
-		o.shardFunc = fn
-	}
+// WithHashedShard returns an option to configure a m-on-n consistent hashing shard
+// using Google's Jump Consistent with the fnv64a hash of the run as its key.
+// See WithShard for more detail.
+func WithHashedShard(m, n int) Option {
+	return WithShard(
+		fmt.Sprintf("%d_%d", m+1, n),
+		func(run string) bool {
+			h := fnv.New64a()
+			h.Write([]byte(run))
+			return int(jump.Hash(h.Sum64(), n)) == m
+		})
 }
 
 // WithAwaitTimeout returns an option to override the default run goroutine
@@ -109,7 +115,7 @@ type Metrics struct {
 
 func defaultOptions() options {
 	return options{
-		shardFunc:    defaultShardFunc,
+		shardFunc:    func(run string) bool { return true },
 		nameFunc:     getFunctionName,
 		awaitTimeout: time.Hour,
 		consumerOpts: []reflex.ConsumerOption{reflex.WithoutConsumerActivityTTL()},

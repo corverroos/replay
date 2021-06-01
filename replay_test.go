@@ -15,8 +15,8 @@ func TestSharding(t *testing.T) {
 			var found bool
 			for m := 0; m < shards; m++ {
 				o := defaultOptions()
-				WithShard(m, shards)(&o)
-				if ofShard(o, fmt.Sprint(run)) {
+				WithHashedShard(m, shards)(&o)
+				if o.shardFunc(fmt.Sprint(run)) {
 					if found {
 						require.Fail(t, "duplicate ofShard")
 					}

@@ -483,9 +483,9 @@ func TestShards(t *testing.T) {
 
 	// Start the activity and workflow consumers
 	for i := 0; i < shards; i++ {
-		replay.RegisterActivity(oneCtx(t), cl, cstore, Backends{}, ns, EnrichGreeting, replay.WithShard(i, shards))
-		replay.RegisterActivity(oneCtx(t), cl, cstore, Backends{}, ns, PrintGreeting, replay.WithShard(i, shards))
-		replay.RegisterWorkflow(oneCtx(t), cl, cstore, ns, workflow, replay.WithName(w), replay.WithShard(i, shards))
+		replay.RegisterActivity(oneCtx(t), cl, cstore, Backends{}, ns, EnrichGreeting, replay.WithHashedShard(i, shards))
+		replay.RegisterActivity(oneCtx(t), cl, cstore, Backends{}, ns, PrintGreeting, replay.WithHashedShard(i, shards))
+		replay.RegisterWorkflow(oneCtx(t), cl, cstore, ns, workflow, replay.WithName(w), replay.WithHashedShard(i, shards))
 	}
 
 	// Wait for all runs to complete
@@ -509,9 +509,9 @@ func TestReShard(t *testing.T) {
 
 			// Start the activity and workflow consumers (these will block/cancel at the end of the sub-test.
 			for i := 0; i < shards; i++ {
-				replay.RegisterActivity(oneCtx(t), cl, cstore, Backends{}, ns, EnrichGreeting, replay.WithShard(i, shards))
-				replay.RegisterActivity(oneCtx(t), cl, cstore, Backends{}, ns, PrintGreeting, replay.WithShard(i, shards))
-				replay.RegisterWorkflow(oneCtx(t), cl, cstore, ns, workflow, replay.WithName(w), replay.WithShard(i, shards))
+				replay.RegisterActivity(oneCtx(t), cl, cstore, Backends{}, ns, EnrichGreeting, replay.WithHashedShard(i, shards))
+				replay.RegisterActivity(oneCtx(t), cl, cstore, Backends{}, ns, PrintGreeting, replay.WithHashedShard(i, shards))
+				replay.RegisterWorkflow(oneCtx(t), cl, cstore, ns, workflow, replay.WithName(w), replay.WithHashedShard(i, shards))
 			}
 
 			// Wait for all runs to complete (also previous subtest runs since those runs are reprocessed)
@@ -520,7 +520,7 @@ func TestReShard(t *testing.T) {
 	}
 }
 
-func TestCustomShards(t *testing.T) {
+func TestCustomShardFunc(t *testing.T) {
 	ctx, cl, _, cstore := setup(t)
 
 	workflow := makeWorkflow(2)
@@ -528,9 +528,11 @@ func TestCustomShards(t *testing.T) {
 	shards := 5
 
 	// Just mod runs over the total shards
-	shardFunc := func(n int, run string) int {
-		m, _ := strconv.Atoi(run)
-		return m % n
+	shardFunc := func(m, n int) func(run string) bool {
+		return func(run string) bool {
+			r, _ := strconv.Atoi(run)
+			return r%n == m
+		}
 	}
 
 	// Create the runs
@@ -541,9 +543,9 @@ func TestCustomShards(t *testing.T) {
 	}
 
 	// Start only 1 of 5 shards
-	replay.RegisterActivity(oneCtx(t), cl, cstore, Backends{}, ns, EnrichGreeting, replay.WithShard(0, shards), replay.WithShardFunc(shardFunc))
-	replay.RegisterActivity(oneCtx(t), cl, cstore, Backends{}, ns, PrintGreeting, replay.WithShard(0, shards), replay.WithShardFunc(shardFunc))
-	replay.RegisterWorkflow(oneCtx(t), cl, cstore, ns, workflow, replay.WithName(w), replay.WithShard(0, shards), replay.WithShardFunc(shardFunc))
+	replay.RegisterActivity(oneCtx(t), cl, cstore, Backends{}, ns, EnrichGreeting, replay.WithShard("0", shardFunc(0, shards)))
+	replay.RegisterActivity(oneCtx(t), cl, cstore, Backends{}, ns, PrintGreeting, replay.WithShard("0", shardFunc(0, shards)))
+	replay.RegisterWorkflow(oneCtx(t), cl, cstore, ns, workflow, replay.WithName(w), replay.WithShard("0", shardFunc(0, shards)))
 
 	// Wait for 4 (5/20) runs to complete
 	awaitCompletes(t, cl, ns, w, "", runs/shards)

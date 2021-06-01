@@ -8,7 +8,6 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"hash/fnv"
 	"path"
 	"reflect"
 	"runtime"
@@ -16,7 +15,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/dgryski/go-jump"
 	"github.com/golang/protobuf/proto"
 	"github.com/golang/protobuf/ptypes"
 	"github.com/luno/fate"
@@ -102,7 +100,7 @@ func RegisterActivity(getCtx func() context.Context, cl Client, cstore reflex.Cu
 			return err
 		}
 
-		if key.Target != activity || key.Namespace != namespace || !ofShard(o, key.Run) {
+		if key.Target != activity || key.Namespace != namespace || !o.shardFunc(key.Run) {
 			return nil
 		}
 
@@ -132,7 +130,7 @@ func RegisterActivity(getCtx func() context.Context, cl Client, cstore reflex.Cu
 		return cl.Internal().RespondActivity(ctx, e.ForeignID, respVals[0].Interface().(proto.Message))
 	}
 
-	name := path.Join("replay_activity", namespace, activity, shardSuffix(o))
+	name := path.Join("replay_activity", namespace, activity, o.shardName)
 	consumer := reflex.NewConsumer(name, fn, o.consumerOpts...)
 	spec := reflex.NewSpec(cl.Stream(namespace, "", ""), cstore, consumer)
 	go rpatterns.RunForever(getCtx, spec)
@@ -173,7 +171,7 @@ func RegisterWorkflow(getCtx func() context.Context, cl Client, cstore reflex.Cu
 			return err
 		}
 
-		if key.Workflow != workflow || key.Namespace != namespace || !ofShard(o, key.Run) {
+		if key.Workflow != workflow || key.Namespace != namespace || !o.shardFunc(key.Run) {
 			return nil
 		}
 
@@ -205,7 +203,7 @@ func RegisterWorkflow(getCtx func() context.Context, cl Client, cstore reflex.Cu
 		}
 	}
 
-	name := path.Join("replay_workflow", namespace, workflow, shardSuffix(o))
+	name := path.Join("replay_workflow", namespace, workflow, o.shardName)
 	consumer := reflex.NewConsumer(name, fn, o.consumerOpts...)
 	spec := reflex.NewSpec(cl.Stream(namespace, workflow, ""), cstore, consumer)
 	go rpatterns.RunForever(getCtx, spec)
@@ -733,28 +731,6 @@ func validateWorkflow(workflowFunc interface{}) error {
 	}
 
 	return nil
-}
-
-func defaultShardFunc(n int, run string) int {
-	h := fnv.New64a()
-	h.Write([]byte(run))
-	return int(jump.Hash(h.Sum64(), n))
-}
-
-// shardSuffix returns a consumer name suffix if a shard is configured
-func shardSuffix(o options) string {
-	if o.shardN <= 1 {
-		return ""
-	}
-	return fmt.Sprintf("%d_%d", o.shardM+1, o.shardN)
-}
-
-// ofShard returns true if the run is applicable to shard config.
-func ofShard(o options, run string) bool {
-	if o.shardN <= 1 {
-		return true
-	}
-	return o.shardM == o.shardFunc(o.shardN, run)
 }
 
 func logDebug(ctx context.Context, msg string, opts ...jettison.Option) {
