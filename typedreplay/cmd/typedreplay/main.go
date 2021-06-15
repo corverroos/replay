@@ -39,7 +39,7 @@ func run(debug bool) error {
 
 	filename := path.Join(pwd, "replay_gen.go")
 
-	fmt.Printf("Generating replay_gen.go with a typed API for namespace %s with %d workflows", ns.Name, len(ns.Workflows))
+	fmt.Printf("Generating replay_gen.go with a typed API for namespace %s with %d workflows\n", ns.Name, len(ns.Workflows))
 	src, err := internal.Render(ns, filename, debug)
 	if err != nil {
 		return err
