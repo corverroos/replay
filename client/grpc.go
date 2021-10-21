@@ -138,9 +138,10 @@ func (c *Client) RestartRun(ctx context.Context, key string, message proto.Messa
 	return err
 }
 
-func (c *Client) ListBootstrapEvents(ctx context.Context, key string) ([]reflex.Event, error) {
+func (c *Client) ListBootstrapEvents(ctx context.Context, key string, before string) ([]reflex.Event, error) {
 	rl, err := c.clpb.ListBootstrapEvents(ctx, &pb.ListBootstrapRequest{
-		Key: key,
+		Key:    key,
+		Before: before,
 	})
 	if err != nil {
 		return nil, err

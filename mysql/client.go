@@ -167,7 +167,8 @@ func (c *DBClient) restartRunServer(ctx context.Context, key string, message pro
 	return err
 }
 
-func (c *DBClient) ListBootstrapEvents(ctx context.Context, key string) ([]reflex.Event, error) {
+func (c *DBClient) ListBootstrapEvents(ctx context.Context, key string, _ string) ([]reflex.Event, error) {
+	// TODO(corver): Use before
 	return db.ListBootstrapEvents(ctx, c.dbc, c.events, key)
 }
 

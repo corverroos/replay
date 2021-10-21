@@ -113,7 +113,7 @@ func (s *Server) ListBootstrapEvents(ctx context.Context, req *pb.ListBootstrapR
 		return nil, err
 	}
 
-	el, err := cl.ListBootstrapEvents(ctx, req.Key)
+	el, err := cl.ListBootstrapEvents(ctx, req.Key, req.Before)
 	if err != nil {
 		return nil, err
 	}

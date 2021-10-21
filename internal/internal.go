@@ -208,6 +208,6 @@ type Client interface {
 	// RestartRun completes the current run iteration and start the next iteration with the provided message.
 	RestartRun(ctx context.Context, key string, message proto.Message) error
 
-	// ListBootstrapEvents returns the boostrap events for the run.
-	ListBootstrapEvents(ctx context.Context, key string) ([]reflex.Event, error)
+	// ListBootstrapEvents returns the boostrap events for the run before hte provide event ID.
+	ListBootstrapEvents(ctx context.Context, key string, before string) ([]reflex.Event, error)
 }

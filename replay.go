@@ -11,6 +11,7 @@ import (
 	"path"
 	"reflect"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -339,7 +340,7 @@ func (s *wcState) StartRun(ctx context.Context, e *reflex.Event, key internal.Ke
 // bootstrapRun bootstraps a previously started run by replaying all previous events. It returns
 // true if the run is still active after bootstrapping.
 func (s *wcState) bootstrapRun(ctx context.Context, run string, iter int, upTo int64) (bool, error) {
-	el, err := s.cl.ListBootstrapEvents(ctx, internal.MinKey(s.namespace, s.workflow, run, iter))
+	el, err := s.cl.ListBootstrapEvents(ctx, internal.MinKey(s.namespace, s.workflow, run, iter), strconv.FormatInt(upTo, 10))
 	if err != nil {
 		return false, errors.Wrap(err, "list responses")
 	}

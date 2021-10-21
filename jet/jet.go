@@ -11,6 +11,7 @@ import (
 	"github.com/nats-io/nats.go"
 	"strconv"
 	"strings"
+	"time"
 )
 
 const (
@@ -96,8 +97,7 @@ func (c Client) CompleteRun(ctx context.Context, key string) error {
 	return err
 }
 
-func (c Client) ListBootstrapEvents(ctx context.Context, key string) ([]reflex.Event, error) {
-	// TODO(corver): Add 'before' eventID.
+func (c Client) ListBootstrapEvents(ctx context.Context, key string, before string) ([]reflex.Event, error) {
 	sub, err := keyToSubject(key)
 	if err != nil {
 		return nil, err
@@ -111,7 +111,11 @@ func (c Client) ListBootstrapEvents(ctx context.Context, key string) ([]reflex.E
 		return nil, err
 	}
 
-	sc, err := s.Stream(ctx, "", reflex.WithStreamToHead())
+	// Add timeout just in case before isn't found.
+	ctx, cancel := context.WithTimeout(ctx, time.Second*10)
+	defer cancel()
+
+	sc, err := s.Stream(ctx, "")
 	if err != nil {
 		return nil, err
 	}
@@ -119,16 +123,16 @@ func (c Client) ListBootstrapEvents(ctx context.Context, key string) ([]reflex.E
 	var res []reflex.Event
 	for {
 		e, err := sc.Recv()
-		if errors.Is(err, reflex.ErrHeadReached) {
-			break
-		} else if err != nil {
+		if err != nil {
 			return nil, err
+		}
+
+		if e.ID == before {
+			return res, nil
 		}
 
 		res = append(res, *e)
 	}
-
-	return res, nil
 }
 
 func (c Client) RestartRun(ctx context.Context, key string, message proto.Message) error {

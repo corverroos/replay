@@ -65,12 +65,12 @@ func TestRestart(t *testing.T) {
 	awaitCompletes(t, cl, ns, w, r, 5)
 
 	for i := 0; i < 5; i++ {
-		el, err := cl.Internal().ListBootstrapEvents(ctx, internal.MinKey(ns, w, r, i))
+		el, err := cl.Internal().ListBootstrapEvents(ctx, internal.MinKey(ns, w, r, i), "")
 		jtest.RequireNil(t, err)
 		require.Len(t, el, 2)
 	}
 
-	el, err := cl.Internal().ListBootstrapEvents(ctx, internal.MinKey(ns, w, r, 6))
+	el, err := cl.Internal().ListBootstrapEvents(ctx, internal.MinKey(ns, w, r, 6), "")
 	jtest.RequireNil(t, err)
 	require.Len(t, el, 0)
 }
@@ -166,7 +166,7 @@ func TestIdenticalReplay(t *testing.T) {
 	replay.RegisterWorkflow(oneCtx(t), bcl, cstore, ns, workflow, replay.WithName(w))
 	require.Equal(t, "PrintGreeting", <-bcl.blockedChan)
 
-	el, err := cl.Internal().ListBootstrapEvents(ctx, runkey(r))
+	el, err := cl.Internal().ListBootstrapEvents(ctx, runkey(r), "")
 	jtest.RequireNil(t, err)
 	require.Len(t, el, 6)
 
@@ -174,7 +174,7 @@ func TestIdenticalReplay(t *testing.T) {
 	replay.RegisterWorkflow(oneCtx(t), cl, cstore, ns, workflow, replay.WithName(w))
 	awaitComplete(t, cl, ns, w, r)
 
-	el, err = cl.Internal().ListBootstrapEvents(ctx, runkey(r))
+	el, err = cl.Internal().ListBootstrapEvents(ctx, runkey(r), "")
 	jtest.RequireNil(t, err)
 	require.Len(t, el, 8)
 }
@@ -208,7 +208,7 @@ func TestEarlyCompleteReplay(t *testing.T) {
 	cancel()
 
 	// Ensure only 1 event, RunCreated
-	el, err := cl.Internal().ListBootstrapEvents(context.Background(), runkey(r))
+	el, err := cl.Internal().ListBootstrapEvents(context.Background(), runkey(r), "")
 	jtest.RequireNil(t, err)
 	require.Len(t, el, 1)
 
@@ -222,7 +222,7 @@ func TestEarlyCompleteReplay(t *testing.T) {
 
 	// Wait for 3 events: RunCreated, Complete, Response
 	require.Eventually(t, func() bool {
-		el, err = cl.Internal().ListBootstrapEvents(context.Background(), runkey(r))
+		el, err = cl.Internal().ListBootstrapEvents(context.Background(), runkey(r), "")
 		jtest.RequireNil(t, err)
 		if len(el) < 3 {
 			return false
@@ -239,7 +239,7 @@ func TestEarlyCompleteReplay(t *testing.T) {
 	jtest.RequireNil(t, err)
 	awaitComplete(t, cl, ns, w, "flush")
 
-	el, err = cl.Internal().ListBootstrapEvents(context.Background(), runkey("flush"))
+	el, err = cl.Internal().ListBootstrapEvents(context.Background(), runkey("flush"), "")
 	jtest.RequireNil(t, err)
 	require.Len(t, el, 2)
 }
@@ -266,7 +266,7 @@ func TestBootstrapComplete(t *testing.T) {
 	replay.RegisterWorkflow(oneCtx(t), cl, cstore, ns, noop, replay.WithName(w))
 	awaitComplete(t, cl, ns, w, r)
 
-	el, err := cl.Internal().ListBootstrapEvents(ctx, runkey(r))
+	el, err := cl.Internal().ListBootstrapEvents(ctx, runkey(r), "")
 	jtest.RequireNil(t, err)
 	require.Len(t, el, 7) // No PrintGreeting response
 	require.True(t, reflex.IsType(el[0].Type, internal.RunCreated))
@@ -304,7 +304,7 @@ func TestOutOfOrderResponses(t *testing.T) {
 		}))
 	<-errChan
 
-	el, err := cl.Internal().ListBootstrapEvents(ctx, runkey(r))
+	el, err := cl.Internal().ListBootstrapEvents(ctx, runkey(r), "")
 	jtest.RequireNil(t, err)
 	require.Len(t, el, 6)
 	require.True(t, reflex.IsType(el[0].Type, internal.RunCreated))
@@ -375,7 +375,7 @@ func TestCancelCtxBootstrap(t *testing.T) {
 	awaitComplete(t, cl, ns, w, run1)
 	awaitComplete(t, cl, ns, w, run2)
 
-	el, err := cl.Internal().ListBootstrapEvents(ctx, runkey(run1))
+	el, err := cl.Internal().ListBootstrapEvents(ctx, runkey(run1), "")
 	jtest.RequireNil(t, err)
 	require.Len(t, el, 4)
 	require.True(t, reflex.IsType(el[0].Type, internal.RunCreated))
@@ -418,7 +418,7 @@ func TestAwaitTimeout(t *testing.T) {
 	}
 
 	for i := 0; i < runs; i++ {
-		el, err := cl.Internal().ListBootstrapEvents(ctx, runkey(fmt.Sprintf("run%d", i)))
+		el, err := cl.Internal().ListBootstrapEvents(ctx, runkey(fmt.Sprintf("run%d", i)), "")
 		jtest.RequireNil(t, err)
 		require.Len(t, el, 3)
 		require.True(t, reflex.IsType(el[0].Type, internal.RunCreated))

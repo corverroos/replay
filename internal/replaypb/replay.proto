@@ -59,6 +59,7 @@ message CompleteRequest {
 
 message ListBootstrapRequest {
   string key = 1;
+  string before = 2;
 }
 
 message StreamRequest {
