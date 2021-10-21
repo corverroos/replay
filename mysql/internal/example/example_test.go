@@ -3,10 +3,10 @@ package example
 import (
 	"context"
 	"fmt"
-	"github.com/corverroos/replay/mysql"
-	"github.com/corverroos/replay/mysql/internal/test"
 	"testing"
 	"time"
+
+	"github.com/corverroos/replay/mysql/internal/test"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/luno/fate"
@@ -54,7 +54,7 @@ func TestExampleSignal(t *testing.T) {
 
 	b := Backends{Replay: cl}
 
-	test.RegisterNoSleepSignals(testCtx(t), cl.(*mysql.DBClient), cstore, dbc)
+	test.RegisterNoopSleeps(testCtx(t), cl, cstore, dbc)
 	replay.RegisterActivity(oneCtx(t), cl, cstore, b, "ns", MaybeSignal)
 	replay.RegisterActivity(oneCtx(t), cl, cstore, b, "ns", PrintGreeting)
 	replay.RegisterWorkflow(oneCtx(t), cl, cstore, "ns", SignalWorkflow)
@@ -125,8 +125,8 @@ func MaybeSignal(ctx context.Context, b Backends, f fate.Fate, i *Int) (*Empty, 
 		return &Empty{}, nil
 	}
 	i.Value += 100
-
-	_, err := b.Replay.SignalRun(ctx, "ns", "SignalWorkflow", "ns", "signal", i, fmt.Sprint(i.Value))
+	fmt.Printf("JCR: signalling=%+v\n", i.Value)
+	_, err := b.Replay.SignalRun(ctx, "ns", "SignalWorkflow", "run", "signal", i, fmt.Sprint(i.Value))
 	return &Empty{}, err
 }
 

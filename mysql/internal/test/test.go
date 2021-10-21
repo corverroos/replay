@@ -3,13 +3,14 @@ package test
 import (
 	"context"
 	"database/sql"
-	"github.com/corverroos/replay/mysql"
-	"github.com/corverroos/replay/mysql/internal/db"
-	"github.com/corverroos/replay/mysql/internal/signal"
-	"github.com/corverroos/replay/mysql/internal/sleep"
+	"flag"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/corverroos/replay/mysql"
+	"github.com/corverroos/replay/mysql/internal/db"
+	"github.com/corverroos/replay/mysql/internal/sleep"
 
 	"github.com/luno/reflex"
 	"github.com/luno/reflex/rsql"
@@ -18,6 +19,8 @@ import (
 )
 
 func Setup(t *testing.T, opts ...rsql.EventsOption) (*mysql.DBClient, *sql.DB) {
+	flag.Set("replay_debug", "true")
+
 	dbc := db.ConnectForTesting(t)
 	cl := mysql.NewDBClient(dbc, opts...)
 
@@ -32,10 +35,6 @@ func Setup(t *testing.T, opts ...rsql.EventsOption) (*mysql.DBClient, *sql.DB) {
 
 func RegisterNoopSleeps(getCtx func() context.Context, cl replay.Client, cstore reflex.CursorStore, dbc *sql.DB) {
 	sleep.RegisterForTesting(getCtx, cl, cstore, dbc)
-}
-
-func RegisterNoSleepSignals(getCtx func() context.Context, cl *mysql.DBClient, cstore reflex.CursorStore, dbc *sql.DB) {
-	signal.RegisterForTesting(getCtx, cl, cstore, dbc)
 }
 
 type MemCursorStore struct {

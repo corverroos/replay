@@ -4,6 +4,7 @@ package mysql
 
 import (
 	"context"
+
 	"github.com/luno/reflex"
 	"google.golang.org/grpc"
 
@@ -59,35 +60,17 @@ func (s *Server) SignalRun(ctx context.Context, req *pb.SignalRequest) (*pb.OK, 
 		return nil, err
 	}
 
-	ok, err := cl.signalRunServer(ctx, req.Namespace, req.Workflow, req.Run, req.Signal, req.Message, req.ExternalId)
+	ok, err := cl.SignalRun(ctx, req.Namespace, req.Workflow, req.Run, req.Signal, req.Message, req.ExternalId)
 	return &pb.OK{Ok: ok}, err
 }
 
-func (s *Server) RequestActivity(ctx context.Context, req *pb.KeyMessage) (*pb.Empty, error) {
+func (s *Server) InsertEvent(ctx context.Context, req *pb.InsertRequest) (*pb.Empty, error) {
 	key, cl, err := s.clientFromKey(req.Key)
 	if err != nil {
 		return nil, err
 	}
 
-	return new(pb.Empty), cl.requestActivityServer(ctx, key, req.Message)
-}
-
-func (s *Server) RespondActivity(ctx context.Context, req *pb.KeyMessage) (*pb.Empty, error) {
-	key, cl, err := s.clientFromKey(req.Key)
-	if err != nil {
-		return nil, err
-	}
-
-	return new(pb.Empty), cl.RespondActivityServer(ctx, key, req.Message)
-}
-
-func (s *Server) EmitOutput(ctx context.Context, req *pb.KeyMessage) (*pb.Empty, error) {
-	key, cl, err := s.clientFromKey(req.Key)
-	if err != nil {
-		return nil, err
-	}
-
-	return new(pb.Empty), cl.emitOutputServer(ctx, key, req.Message)
+	return new(pb.Empty), cl.InsertEventRaw(ctx, internal.EventType(req.Type), key, req.Message)
 }
 
 func (s *Server) CompleteRun(ctx context.Context, req *pb.CompleteRequest) (*pb.Empty, error) {

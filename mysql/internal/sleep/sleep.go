@@ -3,9 +3,11 @@ package sleep
 import (
 	"context"
 	"database/sql"
-	"github.com/corverroos/replay/mysql/internal/db"
+	"fmt"
 	"path"
 	"time"
+
+	"github.com/corverroos/replay/mysql/internal/db"
 
 	"github.com/luno/fate"
 	"github.com/luno/jettison/errors"
@@ -28,17 +30,13 @@ func RegisterForTesting(getCtx func() context.Context, cl replay.Client, cstore 
 
 func Register(getCtx func() context.Context, cl replay.Client, cstore reflex.CursorStore, dbc *sql.DB, cursorPrefix string) {
 	fn := func(ctx context.Context, f fate.Fate, e *reflex.Event) error {
-		if !reflex.IsType(e.Type, internal.ActivityRequest) {
+		if !reflex.IsType(e.Type, internal.SleepRequest) {
 			return nil
 		}
 
 		key, err := internal.DecodeKey(e.ForeignID)
 		if err != nil {
 			return err
-		}
-
-		if key.Target != internal.ActivitySleep {
-			return nil
 		}
 
 		message, err := internal.ParseMessage(e)
@@ -57,10 +55,12 @@ func Register(getCtx func() context.Context, cl replay.Client, cstore reflex.Cur
 			return err
 		}
 
+		fmt.Printf("JCR: Sleeper inserted=%+v\n", key.Encode())
+
 		return nil
 	}
 
-	name := path.Join(cursorPrefix, "replay_activity", "internal", internal.ActivitySleep)
+	name := path.Join(cursorPrefix, "replay_activity", "internal", internal.SleepTarget)
 	consumer := reflex.NewConsumer(name, fn, reflex.WithoutConsumerActivityTTL())
 	spec := reflex.NewSpec(cl.Stream("", "", ""), cstore, consumer)
 	go rpatterns.RunForever(getCtx, spec)
@@ -95,7 +95,14 @@ func completeSleepsOnce(ctx context.Context, cl internal.Client, dbc *sql.DB) er
 			return err
 		}
 
-		err = cl.RespondActivity(ctx, key, &replaypb.SleepDone{})
+		fmt.Printf("JCR: popping sleep=%+v\n", key.Encode())
+
+		err = cl.InsertEvent(ctx, internal.SleepResponse, key, &replaypb.SleepDone{})
+		if err != nil {
+			return err
+		}
+
+		_, err = dbc.ExecContext(ctx, "update replay_sleeps set completed=true where id=?", s.ID)
 		if err != nil {
 			return err
 		}

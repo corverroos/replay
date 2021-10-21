@@ -4,12 +4,15 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"github.com/corverroos/replay/mysql/internal/test"
 	"io"
 	"math/rand"
 	"strconv"
 	"testing"
 	"time"
+
+	"github.com/luno/jettison/log"
+
+	"github.com/corverroos/replay/mysql/internal/test"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/luno/fate"
@@ -261,6 +264,8 @@ func TestBootstrapComplete(t *testing.T) {
 
 	require.Equal(t, "PrintGreeting", <-bcl.blockedChan)
 
+	log.Info(ctx, "Starting new workflow that should bootstrap and complete")
+
 	noop := func(ctx replay.RunContext, _ *String) {}
 	// This workflow will complete during bootstrap
 	replay.RegisterWorkflow(oneCtx(t), cl, cstore, ns, noop, replay.WithName(w))
@@ -268,11 +273,16 @@ func TestBootstrapComplete(t *testing.T) {
 
 	el, err := cl.Internal().ListBootstrapEvents(ctx, runkey(r), "")
 	jtest.RequireNil(t, err)
+
+	for i := 0; i < len(el); i++ {
+		fmt.Printf("JCR: el[i]=%+v\n", el[i])
+	}
+
 	require.Len(t, el, 7) // No PrintGreeting response
 	require.True(t, reflex.IsType(el[0].Type, internal.RunCreated))
 	require.True(t, reflex.IsType(el[1].Type, internal.ActivityResponse))
 	require.True(t, reflex.IsType(el[5].Type, internal.ActivityResponse))
-	require.True(t, reflex.IsType(el[6].Type, internal.RunCompleted))
+	require.True(t, reflex.IsType(el[6].Type, internal.RunCompleted), el[6].Type)
 }
 
 func TestOutOfOrderResponses(t *testing.T) {
@@ -770,11 +780,11 @@ func (c *blockingClient) Internal() internal.Client {
 	return c
 }
 
-func (c *blockingClient) RequestActivity(ctx context.Context, key internal.Key, args proto.Message) error {
+func (c *blockingClient) InsertEvent(ctx context.Context, typ internal.EventType, key internal.Key, args proto.Message) error {
 	if ok := c.blockActivity[key.Target]; ok {
 		c.blockedChan <- key.Target
 		time.Sleep(time.Hour)
 	}
 
-	return c.Client.RequestActivity(ctx, key, args)
+	return c.Client.InsertEvent(ctx, typ, key, args)
 }

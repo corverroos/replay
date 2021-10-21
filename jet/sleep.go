@@ -2,6 +2,9 @@ package jet
 
 import (
 	"context"
+	"path"
+	"time"
+
 	"github.com/corverroos/delayq"
 	"github.com/corverroos/replay"
 	"github.com/corverroos/replay/internal"
@@ -12,8 +15,6 @@ import (
 	"github.com/luno/jettison/log"
 	"github.com/luno/reflex"
 	"google.golang.org/protobuf/types/known/durationpb"
-	"path"
-	"time"
 )
 
 func RegisterSleeperForTesting(getCtx func() (context.Context, bool), cl replay.Client, cstore reflex.CursorStore, q delayq.Queue) {
@@ -26,16 +27,7 @@ func RegisterSleeperForTesting(getCtx func() (context.Context, bool), cl replay.
 
 func RegisterSleeper(getCtx func() (context.Context, bool), cl replay.Client, cstore reflex.CursorStore, q delayq.Queue, cursorPrefix string) {
 	fn := func(ctx context.Context, f fate.Fate, e *reflex.Event) error {
-		if !reflex.IsType(e.Type, internal.ActivityRequest) {
-			return nil
-		}
-
-		key, err := internal.DecodeKey(e.ID)
-		if err != nil {
-			return err
-		}
-
-		if key.Target != internal.ActivitySleep {
+		if !reflex.IsType(e.Type, internal.SleepRequest) {
 			return nil
 		}
 
@@ -62,7 +54,7 @@ func RegisterSleeper(getCtx func() (context.Context, bool), cl replay.Client, cs
 		return nil
 	}
 
-	name := path.Join(cursorPrefix, "replay_activity", "internal", internal.ActivitySleep)
+	name := path.Join(cursorPrefix, "replay_activity", "internal", internal.SleepTarget)
 	consumer := reflex.NewConsumer(name, fn, reflex.WithoutConsumerActivityTTL())
 	spec := reflex.NewSpec(cl.Stream("", "", ""), cstore, consumer)
 	go runForever(getCtx, spec)
@@ -89,7 +81,7 @@ func completeSleepsForever(getCtx func() (context.Context, bool), cl internal.Cl
 				return err
 			}
 
-			return cl.RespondActivity(ctx, key, &replaypb.SleepDone{})
+			return cl.InsertEvent(ctx, internal.SleepResponse, key, &replaypb.SleepDone{})
 
 		}, delayq.WithPollPeriod(pollPeriod))
 		if err != nil {

@@ -11,13 +11,16 @@ func _() {
 	_ = x[RunCreated-1]
 	_ = x[RunCompleted-2]
 	_ = x[RunOutput-3]
-	_ = x[ActivityRequest-4]
-	_ = x[ActivityResponse-5]
+	_ = x[RunSignal-4]
+	_ = x[ActivityRequest-5]
+	_ = x[ActivityResponse-6]
+	_ = x[SleepRequest-7]
+	_ = x[SleepResponse-8]
 }
 
-const _EventType_name = "RunCreatedRunCompletedRunOutputActivityRequestActivityResponse"
+const _EventType_name = "RunCreatedRunCompletedRunOutputRunSignalActivityRequestActivityResponseSleepRequestSleepResponse"
 
-var _EventType_index = [...]uint8{0, 10, 22, 31, 46, 62}
+var _EventType_index = [...]uint8{0, 10, 22, 31, 40, 55, 71, 83, 96}
 
 func (i EventType) String() string {
 	i -= 1

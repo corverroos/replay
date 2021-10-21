@@ -8,13 +8,15 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"google.golang.org/protobuf/types/known/durationpb"
 	"path"
 	"reflect"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
+
+	"google.golang.org/protobuf/types/known/durationpb"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/luno/fate"
@@ -38,7 +40,7 @@ var errAckTimeout = errors.New("timeout waiting for ack ", j.C("ERR_20099904c7fa
 
 // Client defines the main replay sdk API.
 type Client interface {
-	// RunWorkflow returns true if it a RunCreated event
+	// RunWorkflow returns true if a RunCreated event
 	// was inserted which will result in an invocation
 	// of the workflow with the message.
 	//
@@ -118,7 +120,7 @@ func RegisterActivity(getCtx func() context.Context, cl Client, cstore reflex.Cu
 			return respVals[1].Interface().(error)
 		}
 
-		return cl.Internal().RespondActivity(ctx, key, respVals[0].Interface().(proto.Message))
+		return cl.Internal().InsertEvent(ctx, internal.ActivityResponse, key, respVals[0].Interface().(proto.Message))
 	}
 
 	name := path.Join("replay_activity", namespace, activity, o.shardName)
@@ -180,8 +182,11 @@ func RegisterWorkflow(getCtx func() context.Context, cl Client, cstore reflex.Cu
 			logDebug(ctx, "starting run", j.KS("key", key.Encode()))
 			_, err := s.StartRun(ctx, e, key, message)
 			return err
-		case internal.ActivityResponse.ReflexType():
+		case internal.ActivityResponse.ReflexType(), internal.SleepResponse.ReflexType():
 			_, err := s.RespondActivity(ctx, e, key, message, false)
+			return err
+		case internal.RunSignal.ReflexType():
+			_, err := s.EnqueueSignal(ctx, e, key, message, false)
 			return err
 		case internal.ActivityRequest.ReflexType():
 			return nil
@@ -189,8 +194,10 @@ func RegisterWorkflow(getCtx func() context.Context, cl Client, cstore reflex.Cu
 			return nil
 		case internal.RunOutput.ReflexType():
 			return nil
+		case internal.SleepRequest.ReflexType():
+			return nil
 		default:
-			return errors.New("bug: unknown type")
+			return errors.New("bug: unknown type", j.KV("type", e.Type))
 		}
 	}
 
@@ -202,16 +209,16 @@ func RegisterWorkflow(getCtx func() context.Context, cl Client, cstore reflex.Cu
 
 // runState contains the state of a run goroutine.
 type runState struct {
-	mu sync.Mutex
-
-	//  indexes maintains the request index/sequence per target. The nth time a run calls an activity/output.
-	indexes map[string]int
+	// bufferedSignals buffer all received bufferedSignals.
+	bufferedSignals map[string][]response
+	awaitingSignal  *internal.Key
+	signalsMu       sync.Mutex
 
 	//  awaitTimeout defines the duration the run goroutine will wait for an activity response after
 	// which it will exit. In this case, the workflow consumer will bootstrap it when the response is received.
 	awaitTimeout time.Duration
 
-	//  resChan is used by the workflow consumer to pass activity responses to the run goroutine.
+	//  resChan is used by the workflow consumer to pass activity responses and bufferedSignals to the run goroutine.
 	resChan chan response
 
 	//  ackChan is used by the run goroutine to signal the main workflow consumer
@@ -226,6 +233,19 @@ type response struct {
 	event   *reflex.Event
 }
 
+//- when run goroutine calls awaitsignal
+//-- if buffered, pop and return (no ack)
+//-- else enqueue sleep activity
+//-- then ack and wait for signal or sleep response
+//
+//- when workflow consumes signal
+//-- if not waiting for this signal, buffer and return
+//-- else handoff and wait for ack
+//
+//- when workflow consumes signal sleep timeout
+//-- if not waiting for this signal, drop and return
+//-- else handoff and wait for ack
+
 // ack is a signal from a run goroutine to the workflow consumer that it is progressed to
 // a checkpoint.
 type ack struct {
@@ -235,14 +255,62 @@ type ack struct {
 	cancel   bool
 }
 
-func (s *runState) GetAndInc(target string) int {
-	s.mu.Lock()
+func (s *runState) MaybePopSignal(signal string) (response, bool) {
+	s.signalsMu.Lock()
+	defer s.signalsMu.Unlock()
+
+	sl := s.bufferedSignals[signal]
+	if len(sl) == 0 {
+		return response{}, false
+	}
+
+	s.bufferedSignals[signal] = sl[1:]
+
+	return sl[0], true
+}
+
+func (s *runState) IsAwaitingSignal(key internal.Key, incomingSignal bool) bool {
+	s.signalsMu.Lock()
+	defer s.signalsMu.Unlock()
+
+	if s.awaitingSignal == nil {
+		return false
+	}
+
+	if incomingSignal {
+		// For incoming signals, we only compare target.
+		return s.awaitingSignal.Target == key.Target
+	}
+	// For sleep responses, we compare the whole key.
+	return *s.awaitingSignal == key
+}
+
+func (s *runState) AwaitSignal(ctx context.Context, signal string, key internal.Key) response {
+	s.signalsMu.Lock()
+	s.awaitingSignal = &key
+	s.signalsMu.Unlock()
 	defer func() {
-		s.indexes[target]++
-		s.mu.Unlock()
+		s.signalsMu.Lock()
+		s.awaitingSignal = nil
+		s.signalsMu.Unlock()
 	}()
 
-	return s.indexes[target]
+	s.ackChan <- ack{await: true}
+
+	ctx, cancelFunc := context.WithTimeout(ctx, s.awaitTimeout)
+	defer cancelFunc()
+
+	select {
+	case <-ctx.Done():
+		panic(errors.Wrap(errCtxCancel, "awaiting signal", j.KS("signal", signal)))
+	case r := <-s.resChan:
+		if r.key.Target == internal.SleepTarget && r.key != key {
+			panic(errors.New("bug: unexpected signal sleep", j.MKS{"want": key.Encode(), "got": r.key.Encode()}))
+		} else if r.key.Target != internal.SleepTarget && r.key.Target != key.Target {
+			panic(errors.New("bug: unexpected signal", j.MKS{"want": signal, "got": key.Target}))
+		}
+		return r
+	}
 }
 
 func (s *runState) AwaitActivity(ctx context.Context, key internal.Key) response {
@@ -290,10 +358,10 @@ func (s *wcState) StartRun(ctx context.Context, e *reflex.Event, key internal.Ke
 	}
 
 	rs := &runState{
-		resChan:      make(chan response), // Must be blocking, so workflow consumer knows that it handed over responses.
-		indexes:      make(map[string]int),
-		ackChan:      make(chan ack, 1),
-		awaitTimeout: s.awaitTimeout,
+		resChan:         make(chan response), // Must be blocking, so workflow consumer knows that it handed over responses.
+		ackChan:         make(chan ack, 1),
+		bufferedSignals: make(map[string][]response),
+		awaitTimeout:    s.awaitTimeout,
 	}
 	s.runs[key.Run] = rs
 
@@ -333,7 +401,7 @@ func (s *wcState) StartRun(ctx context.Context, e *reflex.Event, key internal.Ke
 		s.metrics.IncComplete(time.Since(e.Timestamp))
 	}()
 
-	return s.processAck(ctx, rs.ackChan)
+	return awaitAck(ctx, rs)
 }
 
 // bootstrapRun bootstraps a previously started run by replaying all previous events. It returns
@@ -366,11 +434,11 @@ func (s *wcState) bootstrapRun(ctx context.Context, run string, iter int, to str
 			return false, err
 		}
 
-		if i == 0 {
-			if !reflex.IsType(e.Type, internal.RunCreated) {
-				return false, errors.New("bug: unexpected first event", j.KV("type", e.Type))
-			}
+		if i == 0 && !reflex.IsType(e.Type, internal.RunCreated) {
+			return false, errors.New("bug: unexpected first event", j.KV("type", e.Type))
+		}
 
+		if reflex.IsType(e.Type, internal.RunCreated) {
 			active, err := s.StartRun(ctx, &e, key, message)
 			if err != nil {
 				return active, err
@@ -380,22 +448,31 @@ func (s *wcState) bootstrapRun(ctx context.Context, run string, iter int, to str
 				return false, nil
 			}
 
-			continue
-		}
-
-		if !reflex.IsType(e.Type, internal.ActivityResponse) {
-			return false, errors.New("bug: unexpected type")
-		}
-
-		active, err := s.RespondActivity(ctx, &e, key, message, true)
-		if err != nil {
-			return false, err
-		} else if !active {
-			if e.ID != to {
-				// Workflow logic changed: run completed during bootstrap. Skip rest of events.
-				log.Error(ctx, errors.New("run completed during bootstrap"))
+		} else if reflex.IsAnyType(e.Type, internal.ActivityResponse, internal.SleepResponse) {
+			active, err := s.RespondActivity(ctx, &e, key, message, true)
+			if err != nil {
+				return false, err
+			} else if !active {
+				if e.ID != to {
+					// Workflow logic changed: run completed during bootstrap. Skip rest of events.
+					log.Error(ctx, errors.New("run completed during bootstrap"))
+				}
+				return false, nil
 			}
-			return false, nil
+
+		} else if reflex.IsType(e.Type, internal.RunSignal) {
+			active, err := s.EnqueueSignal(ctx, &e, key, message, true)
+			if err != nil {
+				return false, err
+			} else if !active {
+				if e.ID != to {
+					// Workflow logic changed: run completed during bootstrap. Skip rest of events.
+					log.Error(ctx, errors.New("run completed during bootstrap"))
+				}
+				return false, nil
+			}
+		} else {
+			return false, errors.New("unsupported bootstrap type")
 		}
 
 		if e.ID == to {
@@ -427,27 +504,57 @@ func (s *wcState) RespondActivity(ctx context.Context, e *reflex.Event, key inte
 	rs := s.runs[key.Run]
 	s.Unlock()
 
-	var expectErr bool
-	select {
-	case <-ctx.Done():
-		return false, ctx.Err()
-	case <-time.After(time.Second):
-		// Since there is a delay after the run goroutine acks that it is waiting for a response
-		// and before it blocks receiving on the response channel, we allow it some time to get there.
-		//
-		// Run goroutine not waiting, expect an error, then back off and try again.
-		//
-		// Note that run goroutines timeout while waiting, so there is always a probability that these errors
-		// can occur. Maybe add support to handle it gracefully without an error.
-		expectErr = true
-	case rs.resChan <- response{key: key, message: message, event: e}:
+	// Signal sleep responses are special, drop them if the goroutine isn't waiting anymore.
+	if reflex.IsType(e.Type, internal.SleepResponse) && key.Target != internal.SleepTarget && !rs.IsAwaitingSignal(key, false) {
+		fmt.Printf("JCR: dropping ignored sleep=%+v\n", key.Encode())
+		return true, nil
 	}
 
-	ok, err := s.processAck(ctx, rs.ackChan)
-	if expectErr && (err == nil || errors.Is(err, errAckTimeout)) {
+	ok := handOff(ctx, rs.resChan, response{key: key, message: message, event: e})
+
+	active, err := awaitAck(ctx, rs)
+	if !ok && (err == nil || errors.Is(err, errAckTimeout)) {
 		return false, errors.New("bug: run goroutine not waiting nor acked with an error")
 	}
-	return ok, err
+	return active, err
+}
+
+func (s *wcState) EnqueueSignal(ctx context.Context, e *reflex.Event, key internal.Key, message proto.Message, bootstrap bool) (bool, error) {
+	s.Lock()
+
+	if _, ok := s.runs[key.Run]; !ok {
+		// This run received a signal, but isn't currently running, try to bootstrap it.
+		s.Unlock()
+
+		if bootstrap {
+			return false, errors.New("bug: recursive bootstrapping")
+		}
+		logDebug(ctx, "bootstrapping run", j.KS("key", key.Encode()))
+
+		return s.bootstrapRun(ctx, key.Run, key.Iteration, e.ID)
+	}
+
+	rs := s.runs[key.Run]
+	s.Unlock()
+
+	if !rs.IsAwaitingSignal(key, false) {
+		// Just buffer the signal and return
+		rs.bufferedSignals[key.Target] = append(rs.bufferedSignals[key.Target], response{
+			key:     key,
+			message: message,
+			event:   e,
+		})
+
+		return true, nil
+	}
+
+	ok := handOff(ctx, rs.resChan, response{key: key, message: message, event: e})
+
+	active, err := awaitAck(ctx, rs)
+	if !ok && (err == nil || errors.Is(err, errAckTimeout)) {
+		return false, errors.New("bug: run goroutine not waiting nor acked with an error")
+	}
+	return active, err
 }
 
 func (s *wcState) run(ctx context.Context, e *reflex.Event, run string, iter int, message proto.Message, state *runState) {
@@ -462,37 +569,15 @@ func (s *wcState) run(ctx context.Context, e *reflex.Event, run string, iter int
 			cl:          s.cl,
 			createEvent: e,
 			lastEvent:   e,
+			indexes: make(map[struct {
+				Type   internal.EventType
+				Target string
+			}]int),
 		}),
 		reflect.ValueOf(message),
 	}
 
 	reflect.ValueOf(s.workflowFunc).Call(args)
-}
-
-// processAck waits for an ack from the run goroutine.
-// It returns true if the run is still active; awaiting next activity response.
-func (s *wcState) processAck(ctx context.Context, ackChan chan ack) (bool, error) {
-
-	var a ack
-	select {
-	case <-ctx.Done():
-		return false, ctx.Err()
-	case <-time.After(time.Minute):
-		return false, errors.Wrap(errAckTimeout, "")
-	case a = <-ackChan:
-	}
-
-	if a.await {
-		return true, nil
-	} else if a.complete {
-		return false, nil
-	} else if a.cancel {
-		return false, errors.New("run cancelled")
-	} else if a.panic {
-		return false, errors.New("run panic")
-	} else {
-		return false, errors.New("bug: invalid ack")
-	}
 }
 
 // RunContext provides the replay API for a workflow function.
@@ -507,11 +592,17 @@ type RunContext struct {
 
 	createEvent *reflex.Event
 	lastEvent   *reflex.Event
+
+	//  indexes maintains the request index/sequence per target. The nth time a run calls an activity/output.
+	indexes map[struct {
+		Type   internal.EventType
+		Target string
+	}]int
 }
 
 // Restart completes the current run iteration and start the next iteration with the provided message.
 func (c *RunContext) Restart(message proto.Message) {
-	// TODO(corver): Maybe add Option to drain signals.
+	// TODO(corver): Maybe add Option to drain bufferedSignals.
 	ensure(c, func() error {
 		return c.cl.RestartRun(c, internal.MinKey(c.namespace, c.workflow, c.run, c.iter), message)
 	})
@@ -532,18 +623,17 @@ func (c *RunContext) ExecActivity(activityFunc interface{}, message proto.Messag
 	}
 	activity := o.nameFunc(activityFunc)
 
-	index := c.state.GetAndInc(activity)
 	key := internal.Key{
 		Namespace: c.namespace,
 		Workflow:  c.workflow,
 		Run:       c.run,
 		Iteration: c.iter,
 		Target:    activity,
-		Sequence:  fmt.Sprint(index),
+		Sequence:  c.getAndInc(internal.ActivityRequest, activity),
 	}
 
 	ensure(c, func() error {
-		return c.cl.RequestActivity(c, key, message)
+		return c.cl.InsertEvent(c, internal.ActivityRequest, key, message)
 	})
 
 	res := c.state.AwaitActivity(c, key)
@@ -554,10 +644,10 @@ func (c *RunContext) ExecActivity(activityFunc interface{}, message proto.Messag
 // AwaitSignal blocks and returns true when this type of signal is/was
 // received for this run. If no signal is/was received it returns false after d duration.
 func (c *RunContext) AwaitSignal(signal string, duration time.Duration) (proto.Message, bool) {
-	activity := internal.ActivitySignal
-	seq := internal.SignalSequence{
-		Signal: signal,
-		Index:  c.state.GetAndInc(fmt.Sprintf("%s:%s", activity, signal)),
+
+	if res, ok := c.state.MaybePopSignal(signal); ok {
+		// We have a buffered signal ready!
+		return res.message, true
 	}
 
 	key := internal.Key{
@@ -565,16 +655,16 @@ func (c *RunContext) AwaitSignal(signal string, duration time.Duration) (proto.M
 		Workflow:  c.workflow,
 		Run:       c.run,
 		Iteration: c.iter,
-		Target:    activity,
-		Sequence:  seq.Encode(),
+		Target:    signal,
+		Sequence:  c.getAndInc(internal.SleepRequest, signal),
 	}
 	ensure(c, func() error {
-		return c.cl.RequestActivity(c, key, &replaypb.SleepRequest{
+		return c.cl.InsertEvent(c, internal.SleepRequest, key, &replaypb.SleepRequest{
 			Duration: durationpb.New(duration),
 		})
 	})
 
-	res := c.state.AwaitActivity(c, key)
+	res := c.state.AwaitSignal(c, signal, key)
 	c.lastEvent = res.event
 	if _, ok := res.message.(*replaypb.SleepDone); ok {
 		return nil, false
@@ -584,17 +674,16 @@ func (c *RunContext) AwaitSignal(signal string, duration time.Duration) (proto.M
 
 // EmitOutput stores the output in the event log and returns on success.
 func (c *RunContext) EmitOutput(output string, message proto.Message) {
-	index := c.state.GetAndInc("output:" + output)
 	key := internal.Key{
 		Namespace: c.namespace,
 		Workflow:  c.workflow,
 		Run:       c.run,
 		Iteration: c.iter,
 		Target:    output,
-		Sequence:  fmt.Sprint(index),
+		Sequence:  c.getAndInc(internal.RunOutput, output),
 	}
 	ensure(c, func() error {
-		return c.cl.EmitOutput(c, key, message)
+		return c.cl.InsertEvent(c, internal.RunOutput, key, message)
 	})
 }
 
@@ -603,19 +692,17 @@ func (c *RunContext) EmitOutput(output string, message proto.Message) {
 // Note that replay sleeps aren't very accurate and
 // a few seconds is the practical minimum.
 func (c *RunContext) Sleep(duration time.Duration) {
-	activity := internal.ActivitySleep
-	index := c.state.GetAndInc(activity)
 	key := internal.Key{
 		Namespace: c.namespace,
 		Workflow:  c.workflow,
 		Run:       c.run,
 		Iteration: c.iter,
-		Target:    activity,
-		Sequence:  fmt.Sprint(index),
+		Target:    internal.SleepTarget,
+		Sequence:  c.getAndInc(internal.SleepRequest, internal.SleepTarget),
 	}
 
 	ensure(c, func() error {
-		return c.cl.RequestActivity(c, key, &replaypb.SleepRequest{
+		return c.cl.InsertEvent(c, internal.SleepRequest, key, &replaypb.SleepRequest{
 			Duration: durationpb.New(duration),
 		})
 	})
@@ -638,6 +725,71 @@ func (c *RunContext) LastEvent() *reflex.Event {
 // Run returns the run name/identifier.
 func (c *RunContext) Run() string {
 	return c.run
+}
+
+// getAndInc returns the current target index value and then increments it.
+func (c *RunContext) getAndInc(typ internal.EventType, target string) string {
+	tuple := struct {
+		Type   internal.EventType
+		Target string
+	}{
+		Type:   typ,
+		Target: target,
+	}
+
+	defer func() {
+		c.indexes[tuple]++
+	}()
+
+	return strconv.Itoa(c.indexes[tuple])
+}
+
+// awaitAck waits for an ack from the run goroutine.
+// It returns true if the run is still active; awaiting next activity response.
+func awaitAck(ctx context.Context, rs *runState) (bool, error) {
+	for {
+		var a ack
+		select {
+		case <-ctx.Done():
+			return false, ctx.Err()
+		case <-time.After(time.Minute):
+			return false, errors.Wrap(errAckTimeout, "")
+		case a = <-rs.ackChan:
+		}
+
+		if a.await {
+			return true, nil
+		} else if a.complete {
+			return false, nil
+		} else if a.cancel {
+			return false, errors.New("run cancelled")
+		} else if a.panic {
+			return false, errors.New("run panic")
+		} else {
+			return false, errors.New("bug: invalid ack")
+		}
+	}
+}
+
+// handOff returns true if the response was handed off to the run goroutine.
+// It returns false if the context was cancelled or after a timeout.
+func handOff(ctx context.Context, ch chan<- response, r response) bool {
+	select {
+	case ch <- r:
+		// Handoff successful
+		return true
+	case <-ctx.Done():
+		return false
+	case <-time.After(time.Second):
+		// Run goroutine not waiting for response, expect an error.
+		//
+		// Note that run goroutines can timeout while waiting, so there is always a probability that these errors
+		// can occur. Maybe add support to handle it gracefully without an error.
+		//
+		// We have to allow some time though since there is a delay after the run goroutine acks that it is waiting for a response
+		// and before it blocks receiving on the response channel.
+		return false
+	}
 }
 
 func getFunctionName(i interface{}) string {

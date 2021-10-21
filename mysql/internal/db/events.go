@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"database/sql"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -152,6 +153,37 @@ func ListBootstrapEvents(ctx context.Context, dbc *sql.DB, key internal.Key) ([]
 	if err != nil {
 		return nil, err
 	}
+
+	el, err := scanEvents(rows)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(el) == 0 {
+		return nil, nil
+	}
+
+	rows, err = dbc.QueryContext(ctx, "select id, `key`, type, timestamp, message "+
+		"from replay_events where namespace=? and workflow=? and run=? and iteration=-1 and type=? and id>? order by id asc",
+		key.Namespace, key.Workflow, key.Run, internal.RunSignal, el[0].ID)
+	if err != nil {
+		return nil, err
+	}
+
+	signals, err := scanEvents(rows)
+	if err != nil {
+		return nil, err
+	}
+
+	el = append(el, signals...)
+	sort.Slice(el, func(i, j int) bool {
+		return el[i].IDInt() < el[j].IDInt()
+	})
+
+	return el, nil
+}
+
+func scanEvents(rows *sql.Rows) ([]reflex.Event, error) {
 	defer rows.Close()
 
 	var res []reflex.Event

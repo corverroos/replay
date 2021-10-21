@@ -4,14 +4,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
+	"strings"
+	"time"
+
 	"github.com/corverroos/replay/internal"
 	"github.com/corverroos/rjet"
 	"github.com/golang/protobuf/proto"
 	"github.com/luno/reflex"
 	"github.com/nats-io/nats.go"
-	"strconv"
-	"strings"
-	"time"
 )
 
 const (
@@ -23,7 +24,7 @@ type Client struct {
 	stream string
 }
 
-func (c Client) RequestActivity(ctx context.Context, key internal.Key, message proto.Message) error {
+func (c Client) InsertEvent(ctx context.Context, typ internal.EventType, key internal.Key, message proto.Message) error {
 	b, err := proto.Marshal(message)
 	if err != nil {
 		return err
@@ -39,47 +40,7 @@ func (c Client) RequestActivity(ctx context.Context, key internal.Key, message p
 		Data:    b,
 	}
 
-	_, err = c.ncl.PublishMsg(&m, nats.Context(ctx), msgID(key, internal.ActivityRequest))
-	return err
-}
-
-func (c Client) RespondActivity(ctx context.Context, key internal.Key, message proto.Message) error {
-	b, err := proto.Marshal(message)
-	if err != nil {
-		return err
-	}
-
-	sub, err := keyToSubject(key)
-	if err != nil {
-		return err
-	}
-
-	m := nats.Msg{
-		Subject: sub,
-		Data:    b,
-	}
-
-	_, err = c.ncl.PublishMsg(&m, nats.Context(ctx), msgID(key, internal.ActivityResponse))
-	return err
-}
-
-func (c Client) EmitOutput(ctx context.Context, key internal.Key, message proto.Message) error {
-	b, err := proto.Marshal(message)
-	if err != nil {
-		return err
-	}
-
-	sub, err := keyToSubject(key)
-	if err != nil {
-		return err
-	}
-
-	m := nats.Msg{
-		Subject: sub,
-		Data:    b,
-	}
-
-	_, err = c.ncl.PublishMsg(&m, nats.Context(ctx), msgID(key, internal.RunOutput))
+	_, err = c.ncl.PublishMsg(&m, nats.Context(ctx), msgID(key, typ))
 	return err
 }
 

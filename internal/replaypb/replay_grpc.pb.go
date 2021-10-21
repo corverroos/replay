@@ -21,9 +21,7 @@ const _ = grpc.SupportPackageIsVersion7
 type ReplayClient interface {
 	RunWorkflow(ctx context.Context, in *RunRequest, opts ...grpc.CallOption) (*OK, error)
 	SignalRun(ctx context.Context, in *SignalRequest, opts ...grpc.CallOption) (*OK, error)
-	RequestActivity(ctx context.Context, in *KeyMessage, opts ...grpc.CallOption) (*Empty, error)
-	RespondActivity(ctx context.Context, in *KeyMessage, opts ...grpc.CallOption) (*Empty, error)
-	EmitOutput(ctx context.Context, in *KeyMessage, opts ...grpc.CallOption) (*Empty, error)
+	InsertEvent(ctx context.Context, in *InsertRequest, opts ...grpc.CallOption) (*Empty, error)
 	CompleteRun(ctx context.Context, in *CompleteRequest, opts ...grpc.CallOption) (*Empty, error)
 	RestartRun(ctx context.Context, in *RunRequest, opts ...grpc.CallOption) (*Empty, error)
 	ListBootstrapEvents(ctx context.Context, in *ListBootstrapRequest, opts ...grpc.CallOption) (*Events, error)
@@ -56,27 +54,9 @@ func (c *replayClient) SignalRun(ctx context.Context, in *SignalRequest, opts ..
 	return out, nil
 }
 
-func (c *replayClient) RequestActivity(ctx context.Context, in *KeyMessage, opts ...grpc.CallOption) (*Empty, error) {
+func (c *replayClient) InsertEvent(ctx context.Context, in *InsertRequest, opts ...grpc.CallOption) (*Empty, error) {
 	out := new(Empty)
-	err := c.cc.Invoke(ctx, "/replaypb.Replay/RequestActivity", in, out, opts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *replayClient) RespondActivity(ctx context.Context, in *KeyMessage, opts ...grpc.CallOption) (*Empty, error) {
-	out := new(Empty)
-	err := c.cc.Invoke(ctx, "/replaypb.Replay/RespondActivity", in, out, opts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *replayClient) EmitOutput(ctx context.Context, in *KeyMessage, opts ...grpc.CallOption) (*Empty, error) {
-	out := new(Empty)
-	err := c.cc.Invoke(ctx, "/replaypb.Replay/EmitOutput", in, out, opts...)
+	err := c.cc.Invoke(ctx, "/replaypb.Replay/InsertEvent", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -148,9 +128,7 @@ func (x *replayStreamClient) Recv() (*reflexpb.Event, error) {
 type ReplayServer interface {
 	RunWorkflow(context.Context, *RunRequest) (*OK, error)
 	SignalRun(context.Context, *SignalRequest) (*OK, error)
-	RequestActivity(context.Context, *KeyMessage) (*Empty, error)
-	RespondActivity(context.Context, *KeyMessage) (*Empty, error)
-	EmitOutput(context.Context, *KeyMessage) (*Empty, error)
+	InsertEvent(context.Context, *InsertRequest) (*Empty, error)
 	CompleteRun(context.Context, *CompleteRequest) (*Empty, error)
 	RestartRun(context.Context, *RunRequest) (*Empty, error)
 	ListBootstrapEvents(context.Context, *ListBootstrapRequest) (*Events, error)
@@ -168,14 +146,8 @@ func (UnimplementedReplayServer) RunWorkflow(context.Context, *RunRequest) (*OK,
 func (UnimplementedReplayServer) SignalRun(context.Context, *SignalRequest) (*OK, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method SignalRun not implemented")
 }
-func (UnimplementedReplayServer) RequestActivity(context.Context, *KeyMessage) (*Empty, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method RequestActivity not implemented")
-}
-func (UnimplementedReplayServer) RespondActivity(context.Context, *KeyMessage) (*Empty, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method RespondActivity not implemented")
-}
-func (UnimplementedReplayServer) EmitOutput(context.Context, *KeyMessage) (*Empty, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method EmitOutput not implemented")
+func (UnimplementedReplayServer) InsertEvent(context.Context, *InsertRequest) (*Empty, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method InsertEvent not implemented")
 }
 func (UnimplementedReplayServer) CompleteRun(context.Context, *CompleteRequest) (*Empty, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method CompleteRun not implemented")
@@ -238,56 +210,20 @@ func _Replay_SignalRun_Handler(srv interface{}, ctx context.Context, dec func(in
 	return interceptor(ctx, in, info, handler)
 }
 
-func _Replay_RequestActivity_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(KeyMessage)
+func _Replay_InsertEvent_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(InsertRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(ReplayServer).RequestActivity(ctx, in)
+		return srv.(ReplayServer).InsertEvent(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: "/replaypb.Replay/RequestActivity",
+		FullMethod: "/replaypb.Replay/InsertEvent",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(ReplayServer).RequestActivity(ctx, req.(*KeyMessage))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _Replay_RespondActivity_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(KeyMessage)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(ReplayServer).RespondActivity(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: "/replaypb.Replay/RespondActivity",
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(ReplayServer).RespondActivity(ctx, req.(*KeyMessage))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _Replay_EmitOutput_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(KeyMessage)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(ReplayServer).EmitOutput(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: "/replaypb.Replay/EmitOutput",
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(ReplayServer).EmitOutput(ctx, req.(*KeyMessage))
+		return srv.(ReplayServer).InsertEvent(ctx, req.(*InsertRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -383,16 +319,8 @@ var Replay_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _Replay_SignalRun_Handler,
 		},
 		{
-			MethodName: "RequestActivity",
-			Handler:    _Replay_RequestActivity_Handler,
-		},
-		{
-			MethodName: "RespondActivity",
-			Handler:    _Replay_RespondActivity_Handler,
-		},
-		{
-			MethodName: "EmitOutput",
-			Handler:    _Replay_EmitOutput_Handler,
+			MethodName: "InsertEvent",
+			Handler:    _Replay_InsertEvent_Handler,
 		},
 		{
 			MethodName: "CompleteRun",

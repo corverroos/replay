@@ -3,10 +3,10 @@ package mysql
 import (
 	"context"
 	"database/sql"
-	"github.com/corverroos/replay/mysql/internal/db"
-	"github.com/corverroos/replay/mysql/internal/signal"
-	"github.com/corverroos/replay/mysql/internal/sleep"
 	"strings"
+
+	"github.com/corverroos/replay/mysql/internal/db"
+	"github.com/corverroos/replay/mysql/internal/sleep"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/golang/protobuf/ptypes/any"
@@ -41,7 +41,6 @@ type DBClient struct {
 // StartLoops starts server-side background loops.
 func (c *DBClient) StartLoops(getCtx func() context.Context, cstore reflex.CursorStore, cursorPrefix string) {
 	sleep.Register(getCtx, c, cstore, c.dbc, cursorPrefix)
-	signal.Register(getCtx, c, cstore, c.dbc, cursorPrefix)
 	db.FillGaps(c.dbc, c.events)
 }
 
@@ -69,22 +68,22 @@ func (c *DBClient) runWorkflowServer(ctx context.Context, key internal.Key, mess
 	return swallowErrDup(db.Insert(ctx, c.dbc, c.events, key, internal.RunCreated, b))
 }
 
-func (c *DBClient) EmitOutput(ctx context.Context, key internal.Key, message proto.Message) error {
+func (c *DBClient) InsertEvent(ctx context.Context, typ internal.EventType, key internal.Key, message proto.Message) error {
 	apb, err := internal.ToAny(message)
 	if err != nil {
 		return err
 	}
 
-	return c.emitOutputServer(ctx, key, apb)
+	return c.InsertEventRaw(ctx, typ, key, apb)
 }
 
-func (c *DBClient) emitOutputServer(ctx context.Context, key internal.Key, message *any.Any) error {
+func (c *DBClient) InsertEventRaw(ctx context.Context, typ internal.EventType, key internal.Key, message *any.Any) error {
 	b, err := internal.Marshal(message)
 	if err != nil {
 		return err
 	}
 
-	_, err = swallowErrDup(db.Insert(ctx, c.dbc, c.events, key, internal.RunOutput, b))
+	_, err = swallowErrDup(db.Insert(ctx, c.dbc, c.events, key, typ, b))
 	return err
 }
 
@@ -98,49 +97,21 @@ func (c *DBClient) SignalRun(ctx context.Context, namespace, workflow, run strin
 		return false, err
 	}
 
-	return c.signalRunServer(ctx, namespace, workflow, run, signal, apb, extID)
-}
-
-func (c *DBClient) signalRunServer(ctx context.Context, namespace, workflow, run string, signalStr string, message *any.Any, extID string) (bool, error) {
-	return swallowErrDup(signal.Insert(ctx, c.dbc, namespace, workflow, run, signalStr, message, extID))
-}
-
-func (c *DBClient) RequestActivity(ctx context.Context, key internal.Key, message proto.Message) error {
-	apb, err := internal.ToAny(message)
+	b, err := proto.Marshal(apb)
 	if err != nil {
-		return err
+		return false, err
 	}
 
-	return c.requestActivityServer(ctx, key, apb)
-}
-
-func (c *DBClient) requestActivityServer(ctx context.Context, key internal.Key, message *any.Any) error {
-	b, err := internal.Marshal(message)
-	if err != nil {
-		return err
+	key := internal.Key{
+		Namespace: namespace,
+		Workflow:  workflow,
+		Run:       run,
+		Iteration: -1,
+		Target:    signal,
+		Sequence:  extID,
 	}
 
-	_, err = swallowErrDup(db.Insert(ctx, c.dbc, c.events, key, internal.ActivityRequest, b))
-	return err
-}
-
-func (c *DBClient) RespondActivity(ctx context.Context, key internal.Key, message proto.Message) error {
-	apb, err := internal.ToAny(message)
-	if err != nil {
-		return err
-	}
-
-	return c.RespondActivityServer(ctx, key, apb)
-}
-
-func (c *DBClient) RespondActivityServer(ctx context.Context, key internal.Key, message *any.Any) error {
-	b, err := internal.Marshal(message)
-	if err != nil {
-		return err
-	}
-
-	_, err = swallowErrDup(db.Insert(ctx, c.dbc, c.events, key, internal.ActivityResponse, b))
-	return err
+	return swallowErrDup(db.Insert(ctx, c.dbc, c.events, key, internal.RunSignal, b))
 }
 
 func (c *DBClient) CompleteRun(ctx context.Context, key internal.Key) error {

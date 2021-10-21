@@ -79,39 +79,14 @@ func (c *Client) SignalRun(ctx context.Context, namespace, workflow, run string,
 	return true, nil
 }
 
-func (c *Client) RequestActivity(ctx context.Context, key internal.Key, message proto.Message) error {
+func (c *Client) InsertEvent(ctx context.Context, typ internal.EventType, key internal.Key, message proto.Message) error {
 	anyMsg, err := internal.ToAny(message)
 	if err != nil {
 		return err
 	}
 
-	_, err = c.clpb.RequestActivity(ctx, &pb.KeyMessage{
-		Key:     key.Encode(),
-		Message: anyMsg,
-	})
-	return err
-}
-
-func (c *Client) RespondActivity(ctx context.Context, key internal.Key, message proto.Message) error {
-	anyMsg, err := internal.ToAny(message)
-	if err != nil {
-		return err
-	}
-
-	_, err = c.clpb.RespondActivity(ctx, &pb.KeyMessage{
-		Key:     key.Encode(),
-		Message: anyMsg,
-	})
-	return err
-}
-
-func (c *Client) EmitOutput(ctx context.Context, key internal.Key, message proto.Message) error {
-	anyMsg, err := internal.ToAny(message)
-	if err != nil {
-		return err
-	}
-
-	_, err = c.clpb.EmitOutput(ctx, &pb.KeyMessage{
+	_, err = c.clpb.InsertEvent(ctx, &pb.InsertRequest{
+		Type:    int32(typ),
 		Key:     key.Encode(),
 		Message: anyMsg,
 	})

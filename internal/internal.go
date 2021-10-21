@@ -18,8 +18,9 @@ import (
 	"github.com/luno/reflex/reflexpb"
 )
 
-const ActivitySleep = "replay_sleep"
-const ActivitySignal = "replay_signal"
+const SleepTarget = "replay_sleep"
+
+// const ActivitySignalSleep = "replay_signal_sleep"
 
 // ErrDuplicate indicates a specific action (like RunWorkflow or SignalRun) has already been performed.
 var ErrDuplicate = errors.New("duplicate entry", j.C("ERR_96713b1c52c5d59f"))
@@ -36,8 +37,11 @@ const (
 	RunCreated       EventType = 1
 	RunCompleted     EventType = 2
 	RunOutput        EventType = 3
-	ActivityRequest  EventType = 4
-	ActivityResponse EventType = 5
+	RunSignal        EventType = 4
+	ActivityRequest  EventType = 5
+	ActivityResponse EventType = 6
+	SleepRequest     EventType = 7
+	SleepResponse    EventType = 8
 )
 
 // ParseMessage returns the typed proto message of the event.
@@ -63,48 +67,25 @@ func ParseMessage(e *reflex.Event) (proto.Message, error) {
 	return d.Message, nil
 }
 
-type SignalSequence struct {
-	Signal string
-	Index  int
-}
-
-func (s SignalSequence) Encode() string {
-	return fmt.Sprintf("%s:%d", s.Signal, s.Index)
-}
-
-func DecodeSignalSequence(sequence string) (SignalSequence, error) {
-	split := strings.Split(sequence, ":")
-	if len(split) < 2 {
-		return SignalSequence{}, errors.New("invalid sequence")
-	}
-
-	index, err := strconv.Atoi(split[1])
-	if err != nil {
-		return SignalSequence{}, errors.New("invalid sequence")
-	}
-
-	return SignalSequence{
-		Signal: split[0],
-		Index:  index,
-	}, nil
-}
-
 type Key struct {
 	Namespace string
 	Workflow  string
 	Run       string
-	Iteration int
+	Iteration int // -1 for incoming signals
 	Target    string
 	Sequence  string
 }
 
 func (k Key) Encode() string {
+	if k.Sequence != "" && k.Target == "" {
+		panic("invalid key: " + fmt.Sprint(k))
+	}
 	return path.Join(k.Namespace, k.Workflow, k.Run, strconv.Itoa(k.Iteration), k.Target, k.Sequence)
 }
 
 func DecodeKey(key string) (Key, error) {
 	split := strings.Split(key, "/")
-	if len(split) < 4 {
+	if len(split) < 4 || len(split) > 6 {
 		return Key{}, errors.New("invalid key")
 	}
 	var k Key
@@ -123,7 +104,7 @@ func DecodeKey(key string) (Key, error) {
 			}
 		} else if i == 4 {
 			k.Target = s
-		} else {
+		} else if i == 5 {
 			k.Sequence = s
 		}
 	}
@@ -193,14 +174,8 @@ func Marshal(message proto.Message) ([]byte, error) {
 
 // Client defines the replay server's internal API. It may only be used by the replay package itself.
 type Client interface {
-	// RequestActivity inserts a ActivityRequest event.
-	RequestActivity(ctx context.Context, key Key, message proto.Message) error
-
-	// RespondActivity inserts a ActivityResponse event.
-	RespondActivity(ctx context.Context, key Key, message proto.Message) error
-
-	// EmitOutput insets a RunOutput event.
-	EmitOutput(ctx context.Context, key Key, message proto.Message) error
+	// InsertEvent inserts a event.
+	InsertEvent(ctx context.Context, typ EventType, key Key, message proto.Message) error
 
 	// CompleteRun inserts a RunComplete event.
 	CompleteRun(ctx context.Context, key Key) error
