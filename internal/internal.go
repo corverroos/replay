@@ -64,12 +64,12 @@ func ParseMessage(e *reflex.Event) (proto.Message, error) {
 }
 
 type SignalSequence struct {
-	SignalType int
-	Index      int
+	Signal string
+	Index  int
 }
 
 func (s SignalSequence) Encode() string {
-	return fmt.Sprintf("%d:%d", s.SignalType, s.Index)
+	return fmt.Sprintf("%s:%d", s.Signal, s.Index)
 }
 
 func DecodeSignalSequence(sequence string) (SignalSequence, error) {
@@ -77,17 +77,15 @@ func DecodeSignalSequence(sequence string) (SignalSequence, error) {
 	if len(split) < 2 {
 		return SignalSequence{}, errors.New("invalid sequence")
 	}
-	typ, err := strconv.Atoi(split[0])
-	if err != nil {
-		return SignalSequence{}, errors.New("invalid sequence")
-	}
+
 	index, err := strconv.Atoi(split[1])
 	if err != nil {
 		return SignalSequence{}, errors.New("invalid sequence")
 	}
+
 	return SignalSequence{
-		SignalType: typ,
-		Index:      index,
+		Signal: split[0],
+		Index:  index,
 	}, nil
 }
 
@@ -201,10 +199,10 @@ type Client interface {
 	// RespondActivity inserts a ActivityResponse event.
 	RespondActivity(ctx context.Context, key string, message proto.Message) error
 
-	// RespondActivity inserts a ActivityResponse event.
+	// EmitOutput insets a RunOutput event.
 	EmitOutput(ctx context.Context, key string, message proto.Message) error
 
-	// RunCompleted inserts a RunComplete event.
+	// CompleteRun inserts a RunComplete event.
 	CompleteRun(ctx context.Context, key string) error
 
 	// RestartRun completes the current run iteration and start the next iteration with the provided message.

@@ -3,6 +3,7 @@ package test
 import (
 	"context"
 	"database/sql"
+	"github.com/corverroos/replay/mysql"
 	"net"
 	"testing"
 	"time"
@@ -15,7 +16,6 @@ import (
 	"github.com/corverroos/replay"
 	"github.com/corverroos/replay/client"
 	pb "github.com/corverroos/replay/internal/replaypb"
-	"github.com/corverroos/replay/server"
 )
 
 // SetupGRPC starts a replay grpc server and returns a connected client.
@@ -52,13 +52,13 @@ func SetupGRPC(t *testing.T) (replay.Client, *sql.DB) {
 }
 
 // newServer starts and returns a replay grpc server and its address.
-func newServer(t *testing.T, cl *server.DBClient) (*server.Server, string) {
+func newServer(t *testing.T, cl *mysql.DBClient) (*mysql.Server, string) {
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	jtest.RequireNil(t, err)
 
 	grpcServer := grpc.NewServer()
 
-	srv := server.NewServer(func(_ string) (*server.DBClient, error) {
+	srv := mysql.NewServer(func(_ string) (*mysql.DBClient, error) {
 		return cl, nil
 	})
 

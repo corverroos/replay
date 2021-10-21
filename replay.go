@@ -1,6 +1,6 @@
 // Package replay provides a workflow framework that is robust with respect to temporary errors.
 //
-// This package presents the replay sdk that the user of the replay framework uses. It intern
+// This package presents the replay sdk that the user of the replay framework uses. It internally
 // uses the internal package.
 package replay
 
@@ -51,7 +51,7 @@ type Client interface {
 	//
 	// External ID must be unique per namespace and workflow otherwise false is returned since
 	// the signal was already created.
-	SignalRun(ctx context.Context, namespace, workflow, run string, s Signal, message proto.Message, extID string) (bool, error)
+	SignalRun(ctx context.Context, namespace, workflow, run string, signal string, message proto.Message, extID string) (bool, error)
 
 	// Stream returns a replay events stream function with optional namespace, workflow and run filters.
 	// Note that empty filters can have a negative performance impact.
@@ -59,15 +59,6 @@ type Client interface {
 
 	// Internal returns the internal replay API. This should only be used by this replay package itself.
 	Internal() internal.Client
-}
-
-// Signal defines a signal that can be sent to a run. The run can then listen and process specific signals.
-// TODO(corver): Refactor this to just a string. Type safety can be moved to typedreplay.
-type Signal interface {
-	// SignalType return the signal enum, identifying different signal types of a workflow.
-	SignalType() int
-	// MessageType defines the data-type associated with this signal.
-	MessageType() proto.Message
 }
 
 // RegisterActivity starts a activity consumer that consumes replay events and executes the activity if requested.
@@ -562,11 +553,11 @@ func (c *RunContext) ExecActivity(activityFunc interface{}, message proto.Messag
 
 // AwaitSignal blocks and returns true when this type of signal is/was
 // received for this run. If no signal is/was received it returns false after d duration.
-func (c *RunContext) AwaitSignal(s Signal, duration time.Duration) (proto.Message, bool) {
+func (c *RunContext) AwaitSignal(signal string, duration time.Duration) (proto.Message, bool) {
 	activity := internal.ActivitySignal
 	seq := internal.SignalSequence{
-		SignalType: s.SignalType(),
-		Index:      c.state.GetAndInc(fmt.Sprintf("%s:%d", activity, s.SignalType())),
+		Signal: signal,
+		Index:  c.state.GetAndInc(fmt.Sprintf("%s:%s", activity, signal)),
 	}
 
 	key := internal.Key{

@@ -47,7 +47,7 @@ CREATE TABLE replay_signals (
   hash BINARY(128) NOT NULL,
   workflow VARCHAR(255) NOT NULL,
   run VARCHAR(255) NOT NULL,
-  type TINYINT NOT NULL,
+  ` + "`signal`" + ` VARCHAR(255) NOT NULL,
   external_id VARCHAR(255) NOT NULL,
   message MEDIUMBLOB,
   created_at DATETIME(3) NOT NULL,

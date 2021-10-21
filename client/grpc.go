@@ -51,7 +51,7 @@ func (c *Client) RunWorkflow(ctx context.Context, namespace, workflow, run strin
 	return true, nil
 }
 
-func (c *Client) SignalRun(ctx context.Context, namespace, workflow, run string, s replay.Signal, message proto.Message, extID string) (bool, error) {
+func (c *Client) SignalRun(ctx context.Context, namespace, workflow, run string, signal string, message proto.Message, extID string) (bool, error) {
 	if err := validateNames(namespace, workflow, run); err != nil {
 		return false, err
 	}
@@ -66,7 +66,7 @@ func (c *Client) SignalRun(ctx context.Context, namespace, workflow, run string,
 		Workflow:   workflow,
 		Run:        run,
 		Message:    anyMsg,
-		SignalType: int32(s.SignalType()),
+		Signal:     signal,
 		ExternalId: extID,
 	})
 	if errors.Is(err, internal.ErrDuplicate) {

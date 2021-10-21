@@ -3,7 +3,7 @@ package signal
 import (
 	"context"
 	"database/sql"
-	"encoding/binary"
+	"github.com/corverroos/replay/mysql/internal/db"
 	"hash/fnv"
 	"path"
 	"time"
@@ -17,7 +17,6 @@ import (
 	"github.com/luno/reflex/rpatterns"
 
 	"github.com/corverroos/replay/internal"
-	"github.com/corverroos/replay/internal/db"
 	"github.com/corverroos/replay/internal/replaypb"
 )
 
@@ -94,7 +93,7 @@ func Register(getCtx func() context.Context, cl replayClient, cstore reflex.Curs
 	go completeAwaitsForever(getCtx, cl, dbc)
 }
 
-func Insert(ctx context.Context, dbc *sql.DB, namespace, workflow, run string, signalType int, message *any.Any, externalID string) error {
+func Insert(ctx context.Context, dbc *sql.DB, namespace, workflow, run string, signal string, message *any.Any, externalID string) error {
 	b, err := proto.Marshal(message)
 	if err != nil {
 		return err
@@ -105,18 +104,13 @@ func Insert(ctx context.Context, dbc *sql.DB, namespace, workflow, run string, s
 	_, _ = h.Write([]byte(namespace))
 	_, _ = h.Write([]byte(workflow))
 	_, _ = h.Write([]byte(run))
-
-	err = binary.Write(h, binary.BigEndian, int32(signalType))
-	if err != nil {
-		return err
-	}
-
+	_, _ = h.Write([]byte(signal))
 	_, _ = h.Write([]byte(externalID))
 	hash := h.Sum(nil)
 
-	_, err = dbc.ExecContext(ctx, "insert into replay_signals set namespace=?, workflow=?, run=?, type=?, external_id=?, created_at=?, message=?, hash=?",
-		namespace, workflow, run, signalType, externalID, time.Now(), b, hash)
-	if err, ok := db.MaybeWrapErrDuplicate(err, "uniq"); ok {
+	_, err = dbc.ExecContext(ctx, "insert into replay_signals set namespace=?, workflow=?, run=?, `signal`=?, external_id=?, created_at=?, message=?, hash=?",
+		namespace, workflow, run, signal, externalID, time.Now(), b, hash)
+	if err, ok := db.MaybeWrapErrDuplicate(err, "replay_signals.uniq"); ok {
 		return err
 	} else if err != nil {
 		return err
@@ -213,8 +207,8 @@ func lookupSignal(ctx context.Context, dbc *sql.DB, key internal.Key) (id int64,
 	}
 
 	err = dbc.QueryRowContext(ctx, "select id, message "+
-		"from replay_signals where namespace=? and workflow=? and run=? and type=? and check_id is null",
-		key.Namespace, key.Workflow, key.Run, seq.SignalType).Scan(&id, &message)
+		"from replay_signals where namespace=? and workflow=? and run=? and `signal`=? and check_id is null",
+		key.Namespace, key.Workflow, key.Run, seq.Signal).Scan(&id, &message)
 	return id, message, err
 }
 

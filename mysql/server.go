@@ -1,10 +1,9 @@
 // Package server provides the replay grpc server, a server side logical client and entrypoint to start server side
 // background loops. It is used when running a replay server or when embedding replay into a user application.
-package server
+package mysql
 
 import (
 	"context"
-
 	"github.com/luno/reflex"
 	"google.golang.org/grpc"
 
@@ -29,6 +28,7 @@ func NewServer(clFunc func(namespace string) (*DBClient, error)) *Server {
 //
 // It uses the server.DBClient's server methods.
 type Server struct {
+	pb.ReplayServer
 	rserver *reflex.Server
 	clFunc  func(namespace string) (*DBClient, error)
 }
@@ -58,7 +58,7 @@ func (s *Server) SignalRun(ctx context.Context, req *pb.SignalRequest) (*pb.OK, 
 		return nil, err
 	}
 
-	ok, err := cl.signalRunServer(ctx, req.Namespace, req.Workflow, req.Run, int(req.SignalType), req.Message, req.ExternalId)
+	ok, err := cl.signalRunServer(ctx, req.Namespace, req.Workflow, req.Run, req.Signal, req.Message, req.ExternalId)
 	return &pb.OK{Ok: ok}, err
 }
 

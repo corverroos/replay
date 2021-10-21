@@ -1,8 +1,11 @@
-package server
+package mysql
 
 import (
 	"context"
 	"database/sql"
+	"github.com/corverroos/replay/mysql/internal/db"
+	"github.com/corverroos/replay/mysql/internal/signal"
+	"github.com/corverroos/replay/mysql/internal/sleep"
 	"strings"
 
 	"github.com/golang/protobuf/proto"
@@ -14,9 +17,6 @@ import (
 
 	"github.com/corverroos/replay"
 	"github.com/corverroos/replay/internal"
-	"github.com/corverroos/replay/internal/db"
-	"github.com/corverroos/replay/internal/signal"
-	"github.com/corverroos/replay/internal/sleep"
 )
 
 var _ replay.Client = (*DBClient)(nil)
@@ -88,7 +88,7 @@ func (c *DBClient) emitOutputServer(ctx context.Context, key string, message *an
 	return err
 }
 
-func (c *DBClient) SignalRun(ctx context.Context, namespace, workflow, run string, s replay.Signal, message proto.Message, extID string) (bool, error) {
+func (c *DBClient) SignalRun(ctx context.Context, namespace, workflow, run string, signal string, message proto.Message, extID string) (bool, error) {
 	if err := validateNames(namespace, workflow, run); err != nil {
 		return false, err
 	}
@@ -98,11 +98,11 @@ func (c *DBClient) SignalRun(ctx context.Context, namespace, workflow, run strin
 		return false, err
 	}
 
-	return c.signalRunServer(ctx, namespace, workflow, run, s.SignalType(), apb, extID)
+	return c.signalRunServer(ctx, namespace, workflow, run, signal, apb, extID)
 }
 
-func (c *DBClient) signalRunServer(ctx context.Context, namespace, workflow, run string, signalType int, message *any.Any, extID string) (bool, error) {
-	return swallowErrDup(signal.Insert(ctx, c.dbc, namespace, workflow, run, signalType, message, extID))
+func (c *DBClient) signalRunServer(ctx context.Context, namespace, workflow, run string, signalStr string, message *any.Any, extID string) (bool, error) {
+	return swallowErrDup(signal.Insert(ctx, c.dbc, namespace, workflow, run, signalStr, message, extID))
 }
 
 func (c *DBClient) RequestActivity(ctx context.Context, key string, message proto.Message) error {

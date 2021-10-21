@@ -3,6 +3,7 @@ package sleep
 import (
 	"context"
 	"database/sql"
+	"github.com/corverroos/replay/mysql/internal/db"
 	"path"
 	"time"
 
@@ -14,7 +15,6 @@ import (
 
 	"github.com/corverroos/replay"
 	"github.com/corverroos/replay/internal"
-	"github.com/corverroos/replay/internal/db"
 	"github.com/corverroos/replay/internal/replaypb"
 )
 

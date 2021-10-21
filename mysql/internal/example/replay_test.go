@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"github.com/corverroos/replay/mysql/internal/test"
 	"io"
 	"math/rand"
 	"strconv"
@@ -19,13 +20,13 @@ import (
 
 	"github.com/corverroos/replay"
 	"github.com/corverroos/replay/internal"
-	"github.com/corverroos/replay/test"
 )
 
 const (
 	ns = "namespace"
 	w  = "workflow"
 	r  = "run"
+	s  = "signal"
 )
 
 func TestNoopWorkflow(t *testing.T) {
@@ -316,31 +317,21 @@ func TestDuplicateSignals(t *testing.T) {
 	for i := 0; i < 100; i++ {
 		extID := fmt.Sprint(rand.Int63())
 		for i := 0; i < 2; i++ {
-			ok, err := cl.SignalRun(ctx, ns, w, r, testsig{}, new(Int), extID)
+			ok, err := cl.SignalRun(ctx, ns, w, r, s, new(Int), extID)
 			jtest.RequireNil(t, err)
 			require.Equal(t, i == 0, ok)
 		}
 	}
 }
 
-type testsig2 struct{}
-
-func (s testsig2) SignalType() int {
-	return 2
-}
-
-func (s testsig2) MessageType() proto.Message {
-	return &Int{}
-}
-
 func TestUniqSignals(t *testing.T) {
 	ctx, cl, _, _ := setup(t)
 
-	ok, err := cl.SignalRun(ctx, ns, w, r, testsig{}, new(Int), "")
+	ok, err := cl.SignalRun(ctx, ns, w, r, "signal1", new(Int), "")
 	jtest.RequireNil(t, err)
 	require.True(t, ok)
 
-	ok, err = cl.SignalRun(ctx, ns, w, r, testsig2{}, new(Int), "")
+	ok, err = cl.SignalRun(ctx, ns, w, r, "signal2", new(Int), "")
 	jtest.RequireNil(t, err)
 	require.True(t, ok)
 }
@@ -767,8 +758,8 @@ func (c *blockingClient) RunWorkflow(ctx context.Context, namespace, workflow, r
 	return c.cl.RunWorkflow(ctx, namespace, workflow, run, message)
 }
 
-func (c *blockingClient) SignalRun(ctx context.Context, namespace, workflow, run string, s replay.Signal, message proto.Message, extID string) (bool, error) {
-	return c.cl.SignalRun(ctx, namespace, workflow, run, s, message, extID)
+func (c *blockingClient) SignalRun(ctx context.Context, namespace, workflow, run string, signal string, message proto.Message, extID string) (bool, error) {
+	return c.cl.SignalRun(ctx, namespace, workflow, run, signal, message, extID)
 }
 
 func (c *blockingClient) Stream(namespace, workflow, run string) reflex.StreamFunc {

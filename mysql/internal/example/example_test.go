@@ -3,6 +3,8 @@ package example
 import (
 	"context"
 	"fmt"
+	"github.com/corverroos/replay/mysql"
+	"github.com/corverroos/replay/mysql/internal/test"
 	"testing"
 	"time"
 
@@ -13,8 +15,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/corverroos/replay"
-	"github.com/corverroos/replay/server"
-	"github.com/corverroos/replay/test"
 )
 
 //go:generate protoc --go_out=plugins=grpc:. ./example.proto
@@ -54,7 +54,7 @@ func TestExampleSignal(t *testing.T) {
 
 	b := Backends{Replay: cl}
 
-	test.RegisterNoSleepSignals(testCtx(t), cl.(*server.DBClient), cstore, dbc)
+	test.RegisterNoSleepSignals(testCtx(t), cl.(*mysql.DBClient), cstore, dbc)
 	replay.RegisterActivity(oneCtx(t), cl, cstore, b, "ns", MaybeSignal)
 	replay.RegisterActivity(oneCtx(t), cl, cstore, b, "ns", PrintGreeting)
 	replay.RegisterWorkflow(oneCtx(t), cl, cstore, "ns", SignalWorkflow)
@@ -107,7 +107,7 @@ func SignalWorkflow(ctx replay.RunContext, _ *Empty) {
 	var sum int
 	for i := 0; i < 10; i++ {
 		ctx.ExecActivity(MaybeSignal, &Int{Value: int64(i)})
-		res, ok := ctx.AwaitSignal(testsig{}, time.Second)
+		res, ok := ctx.AwaitSignal("signal", time.Second)
 		if ok {
 			sum += int(res.(*Int).Value)
 		}
@@ -126,7 +126,7 @@ func MaybeSignal(ctx context.Context, b Backends, f fate.Fate, i *Int) (*Empty, 
 	}
 	i.Value += 100
 
-	_, err := b.Replay.SignalRun(ctx, "ns", "SignalWorkflow", "ns", testsig{}, i, fmt.Sprint(i.Value))
+	_, err := b.Replay.SignalRun(ctx, "ns", "SignalWorkflow", "ns", "signal", i, fmt.Sprint(i.Value))
 	return &Empty{}, err
 }
 

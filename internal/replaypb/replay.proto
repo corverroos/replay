@@ -43,7 +43,7 @@ message SignalRequest {
   string namespace = 1;
   string workflow = 2;
   string run = 3;
-  int32 signal_type = 4;
+  string signal = 4;
   google.protobuf.Any message = 5;
   string external_id = 6;
 }

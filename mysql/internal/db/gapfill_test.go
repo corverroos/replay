@@ -28,7 +28,7 @@ func TestGapFill(t *testing.T) {
 		defer tx.Rollback()
 
 		notify, err := events.InsertWithMetadata(ctx, tx, internal.MinKey("ns", "w", "r", i), internal.RunCreated, nil)
-		if err, ok := MaybeWrapErrDuplicate(err, "by_type_key"); ok {
+		if err, ok := MaybeWrapErrDuplicate(err, "replay_events.by_type_key"); ok {
 			return false
 		} else {
 			jtest.RequireNil(t, err)
