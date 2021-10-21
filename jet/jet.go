@@ -97,7 +97,7 @@ func (c Client) CompleteRun(ctx context.Context, key internal.Key) error {
 	return err
 }
 
-func (c Client) ListBootstrapEvents(ctx context.Context, key internal.Key, before string) ([]reflex.Event, error) {
+func (c Client) ListBootstrapEvents(ctx context.Context, key internal.Key, to string) ([]reflex.Event, error) {
 	sub, err := keyToSubject(key)
 	if err != nil {
 		return nil, err
@@ -127,11 +127,11 @@ func (c Client) ListBootstrapEvents(ctx context.Context, key internal.Key, befor
 			return nil, err
 		}
 
-		if e.ID == before {
+		res = append(res, *e)
+
+		if e.ID == to {
 			return res, nil
 		}
-
-		res = append(res, *e)
 	}
 }
 

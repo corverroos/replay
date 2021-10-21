@@ -12,7 +12,6 @@ import (
 	"path"
 	"reflect"
 	"runtime"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -339,8 +338,8 @@ func (s *wcState) StartRun(ctx context.Context, e *reflex.Event, key internal.Ke
 
 // bootstrapRun bootstraps a previously started run by replaying all previous events. It returns
 // true if the run is still active after bootstrapping.
-func (s *wcState) bootstrapRun(ctx context.Context, run string, iter int, upTo int64) (bool, error) {
-	el, err := s.cl.ListBootstrapEvents(ctx, internal.MinKey(s.namespace, s.workflow, run, iter), strconv.FormatInt(upTo, 10))
+func (s *wcState) bootstrapRun(ctx context.Context, run string, iter int, to string) (bool, error) {
+	el, err := s.cl.ListBootstrapEvents(ctx, internal.MinKey(s.namespace, s.workflow, run, iter), to)
 	if err != nil {
 		return false, errors.Wrap(err, "list responses")
 	}
@@ -384,10 +383,6 @@ func (s *wcState) bootstrapRun(ctx context.Context, run string, iter int, upTo i
 			continue
 		}
 
-		if e.IDInt() > upTo {
-			break
-		}
-
 		if !reflex.IsType(e.Type, internal.ActivityResponse) {
 			return false, errors.New("bug: unexpected type")
 		}
@@ -396,11 +391,15 @@ func (s *wcState) bootstrapRun(ctx context.Context, run string, iter int, upTo i
 		if err != nil {
 			return false, err
 		} else if !active {
-			if e.IDInt() != upTo {
+			if e.ID != to {
 				// Workflow logic changed: run completed during bootstrap. Skip rest of events.
 				log.Error(ctx, errors.New("run completed during bootstrap"))
 			}
 			return false, nil
+		}
+
+		if e.ID == to {
+			break
 		}
 	}
 
@@ -422,7 +421,7 @@ func (s *wcState) RespondActivity(ctx context.Context, e *reflex.Event, key inte
 		}
 		logDebug(ctx, "bootstrapping run", j.KS("key", key.Encode()))
 
-		return s.bootstrapRun(ctx, key.Run, key.Iteration, e.IDInt())
+		return s.bootstrapRun(ctx, key.Run, key.Iteration, e.ID)
 	}
 
 	rs := s.runs[key.Run]
