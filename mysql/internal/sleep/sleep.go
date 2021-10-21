@@ -90,7 +90,12 @@ func completeSleepsOnce(ctx context.Context, cl internal.Client, dbc *sql.DB) er
 			return nil
 		}
 
-		err := cl.RespondActivity(ctx, s.Key, &replaypb.SleepDone{})
+		key, err := internal.DecodeKey(s.Key)
+		if err != nil {
+			return err
+		}
+
+		err = cl.RespondActivity(ctx, key, &replaypb.SleepDone{})
 		if err != nil {
 			return err
 		}

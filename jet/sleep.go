@@ -84,7 +84,13 @@ func completeSleepsForever(getCtx func() (context.Context, bool), cl internal.Cl
 		}
 
 		err := q.Dequeue(ctx, func(msg *delayq.Msg) error {
-			return cl.RespondActivity(ctx, msg.ID, &replaypb.SleepDone{})
+			key, err := internal.DecodeKey(msg.ID)
+			if err != nil {
+				return err
+			}
+
+			return cl.RespondActivity(ctx, key, &replaypb.SleepDone{})
+
 		}, delayq.WithPollPeriod(pollPeriod))
 		if err != nil {
 			log.Error(ctx, errors.Wrap(err, "complete sleeps once"))

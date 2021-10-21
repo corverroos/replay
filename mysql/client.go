@@ -60,7 +60,7 @@ func (c *DBClient) RunWorkflow(ctx context.Context, namespace, workflow, run str
 	return c.runWorkflowServer(ctx, key, apb)
 }
 
-func (c *DBClient) runWorkflowServer(ctx context.Context, key string, message *any.Any) (bool, error) {
+func (c *DBClient) runWorkflowServer(ctx context.Context, key internal.Key, message *any.Any) (bool, error) {
 	b, err := internal.Marshal(message)
 	if err != nil {
 		return false, err
@@ -69,7 +69,7 @@ func (c *DBClient) runWorkflowServer(ctx context.Context, key string, message *a
 	return swallowErrDup(db.Insert(ctx, c.dbc, c.events, key, internal.RunCreated, b))
 }
 
-func (c *DBClient) EmitOutput(ctx context.Context, key string, message proto.Message) error {
+func (c *DBClient) EmitOutput(ctx context.Context, key internal.Key, message proto.Message) error {
 	apb, err := internal.ToAny(message)
 	if err != nil {
 		return err
@@ -78,7 +78,7 @@ func (c *DBClient) EmitOutput(ctx context.Context, key string, message proto.Mes
 	return c.emitOutputServer(ctx, key, apb)
 }
 
-func (c *DBClient) emitOutputServer(ctx context.Context, key string, message *any.Any) error {
+func (c *DBClient) emitOutputServer(ctx context.Context, key internal.Key, message *any.Any) error {
 	b, err := internal.Marshal(message)
 	if err != nil {
 		return err
@@ -105,7 +105,7 @@ func (c *DBClient) signalRunServer(ctx context.Context, namespace, workflow, run
 	return swallowErrDup(signal.Insert(ctx, c.dbc, namespace, workflow, run, signalStr, message, extID))
 }
 
-func (c *DBClient) RequestActivity(ctx context.Context, key string, message proto.Message) error {
+func (c *DBClient) RequestActivity(ctx context.Context, key internal.Key, message proto.Message) error {
 	apb, err := internal.ToAny(message)
 	if err != nil {
 		return err
@@ -114,7 +114,7 @@ func (c *DBClient) RequestActivity(ctx context.Context, key string, message prot
 	return c.requestActivityServer(ctx, key, apb)
 }
 
-func (c *DBClient) requestActivityServer(ctx context.Context, key string, message *any.Any) error {
+func (c *DBClient) requestActivityServer(ctx context.Context, key internal.Key, message *any.Any) error {
 	b, err := internal.Marshal(message)
 	if err != nil {
 		return err
@@ -124,7 +124,7 @@ func (c *DBClient) requestActivityServer(ctx context.Context, key string, messag
 	return err
 }
 
-func (c *DBClient) RespondActivity(ctx context.Context, key string, message proto.Message) error {
+func (c *DBClient) RespondActivity(ctx context.Context, key internal.Key, message proto.Message) error {
 	apb, err := internal.ToAny(message)
 	if err != nil {
 		return err
@@ -133,7 +133,7 @@ func (c *DBClient) RespondActivity(ctx context.Context, key string, message prot
 	return c.RespondActivityServer(ctx, key, apb)
 }
 
-func (c *DBClient) RespondActivityServer(ctx context.Context, key string, message *any.Any) error {
+func (c *DBClient) RespondActivityServer(ctx context.Context, key internal.Key, message *any.Any) error {
 	b, err := internal.Marshal(message)
 	if err != nil {
 		return err
@@ -143,12 +143,12 @@ func (c *DBClient) RespondActivityServer(ctx context.Context, key string, messag
 	return err
 }
 
-func (c *DBClient) CompleteRun(ctx context.Context, key string) error {
+func (c *DBClient) CompleteRun(ctx context.Context, key internal.Key) error {
 	_, err := swallowErrDup(db.Insert(ctx, c.dbc, c.events, key, internal.RunCompleted, nil))
 	return err
 }
 
-func (c *DBClient) RestartRun(ctx context.Context, key string, message proto.Message) error {
+func (c *DBClient) RestartRun(ctx context.Context, key internal.Key, message proto.Message) error {
 	apb, err := internal.ToAny(message)
 	if err != nil {
 		return err
@@ -157,7 +157,7 @@ func (c *DBClient) RestartRun(ctx context.Context, key string, message proto.Mes
 	return c.restartRunServer(ctx, key, apb)
 }
 
-func (c *DBClient) restartRunServer(ctx context.Context, key string, message proto.Message) error {
+func (c *DBClient) restartRunServer(ctx context.Context, key internal.Key, message proto.Message) error {
 	b, err := internal.Marshal(message)
 	if err != nil {
 		return err
@@ -167,9 +167,9 @@ func (c *DBClient) restartRunServer(ctx context.Context, key string, message pro
 	return err
 }
 
-func (c *DBClient) ListBootstrapEvents(ctx context.Context, key string, _ string) ([]reflex.Event, error) {
+func (c *DBClient) ListBootstrapEvents(ctx context.Context, key internal.Key, _ string) ([]reflex.Event, error) {
 	// TODO(corver): Use before
-	return db.ListBootstrapEvents(ctx, c.dbc, c.events, key)
+	return db.ListBootstrapEvents(ctx, c.dbc, key)
 }
 
 func (c *DBClient) Stream(namespace, workflow, run string) reflex.StreamFunc {

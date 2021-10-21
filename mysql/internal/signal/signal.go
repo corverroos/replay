@@ -26,7 +26,7 @@ type replayClient interface {
 	Stream(namespace, workflow, run string) reflex.StreamFunc
 
 	// RespondActivityServer inserts a ActivityResponse event without wrapping it in an any.
-	RespondActivityServer(ctx context.Context, key string, message *any.Any) error
+	RespondActivityServer(ctx context.Context, key internal.Key, message *any.Any) error
 }
 
 type await struct {
@@ -160,7 +160,7 @@ func completeAwaitsOnce(ctx context.Context, cl replayClient, dbc *sql.DB) error
 			}
 		}
 
-		err = cl.RespondActivityServer(ctx, a.Key, &any)
+		err = cl.RespondActivityServer(ctx, key, &any)
 		if err != nil {
 			return err
 		}
@@ -181,7 +181,12 @@ func completeAwaitsOnce(ctx context.Context, cl replayClient, dbc *sql.DB) error
 			return err
 		}
 
-		err = cl.RespondActivityServer(ctx, c.Key, apb)
+		key, err := internal.DecodeKey(c.Key)
+		if err != nil {
+			return err
+		}
+
+		err = cl.RespondActivityServer(ctx, key, apb)
 		if err != nil {
 			return err
 		}

@@ -114,12 +114,7 @@ func (f *filter) Recv() (*reflex.Event, error) {
 	}
 }
 
-func RestartRun(ctx context.Context, dbc *sql.DB, events *rsql.EventsTable, key string, message []byte) error {
-	k, err := internal.DecodeKey(key)
-	if err != nil {
-		return err
-	}
-
+func RestartRun(ctx context.Context, dbc *sql.DB, events *rsql.EventsTable, key internal.Key, message []byte) error {
 	tx, err := dbc.Begin()
 	if err != nil {
 		return err
@@ -137,8 +132,8 @@ func RestartRun(ctx context.Context, dbc *sql.DB, events *rsql.EventsTable, key 
 	}
 
 	// Start next iteration.
-	k.Iteration++
-	notify2, err := insertTX(ctx, events, tx, k.Encode(), internal.RunCreated, message)
+	key.Iteration++
+	notify2, err := insertTX(ctx, events, tx, key, internal.RunCreated, message)
 	if errors.Is(err, internal.ErrDuplicate) {
 		// NoReturnErr: Continue below
 	} else if err != nil {
@@ -150,15 +145,10 @@ func RestartRun(ctx context.Context, dbc *sql.DB, events *rsql.EventsTable, key 
 	return tx.Commit()
 }
 
-func ListBootstrapEvents(ctx context.Context, dbc *sql.DB, events *rsql.EventsTable, key string) ([]reflex.Event, error) {
-	k, err := internal.DecodeKey(key)
-	if err != nil {
-		return nil, err
-	}
-
+func ListBootstrapEvents(ctx context.Context, dbc *sql.DB, key internal.Key) ([]reflex.Event, error) {
 	rows, err := dbc.QueryContext(ctx, "select id, `key`, type, timestamp, message "+
 		"from replay_events where namespace=? and workflow=? and run=? and iteration = ? and (type=? or type=? or type=?) order by id asc",
-		k.Namespace, k.Workflow, k.Run, k.Iteration, internal.RunCreated, internal.ActivityResponse, internal.RunCompleted)
+		key.Namespace, key.Workflow, key.Run, key.Iteration, internal.RunCreated, internal.ActivityResponse, internal.RunCompleted)
 	if err != nil {
 		return nil, err
 	}
@@ -183,7 +173,7 @@ func ListBootstrapEvents(ctx context.Context, dbc *sql.DB, events *rsql.EventsTa
 	return res, rows.Err()
 }
 
-func Insert(ctx context.Context, dbc *sql.DB, events *rsql.EventsTable, key string, typ internal.EventType, message []byte) error {
+func Insert(ctx context.Context, dbc *sql.DB, events *rsql.EventsTable, key internal.Key, typ internal.EventType, message []byte) error {
 	tx, err := dbc.Begin()
 	if err != nil {
 		return err
@@ -199,19 +189,21 @@ func Insert(ctx context.Context, dbc *sql.DB, events *rsql.EventsTable, key stri
 	return tx.Commit()
 }
 
-func insertTX(ctx context.Context, events *rsql.EventsTable, tx *sql.Tx, key string, typ internal.EventType, message []byte) (rsql.NotifyFunc, error) {
+func insertTX(ctx context.Context, events *rsql.EventsTable, tx *sql.Tx, key internal.Key, typ internal.EventType, message []byte) (rsql.NotifyFunc, error) {
+	k := key.Encode()
+
 	// Do lookup to avoid creating tons of gaps when replaying long running runs.
 	var exists int
 	err := tx.QueryRowContext(ctx, "select exists("+
-		"select 1 from replay_events where `key` = ? and type = ?)", key, typ).
+		"select 1 from replay_events where `key` = ? and type = ?)", k, typ).
 		Scan(&exists)
 	if err != nil {
 		return nil, err
 	} else if exists == 1 {
-		return func() {}, errors.Wrap(internal.ErrDuplicate, "duplicate for key", j.KS("key", key))
+		return func() {}, errors.Wrap(internal.ErrDuplicate, "duplicate for key", j.KS("key", k))
 	}
 
-	notify, err := events.InsertWithMetadata(ctx, tx, key, typ, message)
+	notify, err := events.InsertWithMetadata(ctx, tx, k, typ, message)
 	if err, ok := MaybeWrapErrDuplicate(err, "by_type_key"); ok {
 		return nil, err
 	} else if err != nil {

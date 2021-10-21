@@ -8,6 +8,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"google.golang.org/protobuf/types/known/durationpb"
 	"path"
 	"reflect"
 	"runtime"
@@ -17,7 +18,6 @@ import (
 	"time"
 
 	"github.com/golang/protobuf/proto"
-	"github.com/golang/protobuf/ptypes"
 	"github.com/luno/fate"
 	"github.com/luno/jettison"
 	"github.com/luno/jettison/errors"
@@ -119,7 +119,7 @@ func RegisterActivity(getCtx func() context.Context, cl Client, cstore reflex.Cu
 			return respVals[1].Interface().(error)
 		}
 
-		return cl.Internal().RespondActivity(ctx, e.ForeignID, respVals[0].Interface().(proto.Message))
+		return cl.Internal().RespondActivity(ctx, key, respVals[0].Interface().(proto.Message))
 	}
 
 	name := path.Join("replay_activity", namespace, activity, o.shardName)
@@ -544,7 +544,7 @@ func (c *RunContext) ExecActivity(activityFunc interface{}, message proto.Messag
 	}
 
 	ensure(c, func() error {
-		return c.cl.RequestActivity(c, key.Encode(), message)
+		return c.cl.RequestActivity(c, key, message)
 	})
 
 	res := c.state.AwaitActivity(c, key)
@@ -570,8 +570,8 @@ func (c *RunContext) AwaitSignal(signal string, duration time.Duration) (proto.M
 		Sequence:  seq.Encode(),
 	}
 	ensure(c, func() error {
-		return c.cl.RequestActivity(c, key.Encode(), &replaypb.SleepRequest{
-			Duration: ptypes.DurationProto(duration),
+		return c.cl.RequestActivity(c, key, &replaypb.SleepRequest{
+			Duration: durationpb.New(duration),
 		})
 	})
 
@@ -595,7 +595,7 @@ func (c *RunContext) EmitOutput(output string, message proto.Message) {
 		Sequence:  fmt.Sprint(index),
 	}
 	ensure(c, func() error {
-		return c.cl.EmitOutput(c, key.Encode(), message)
+		return c.cl.EmitOutput(c, key, message)
 	})
 }
 
@@ -616,8 +616,8 @@ func (c *RunContext) Sleep(duration time.Duration) {
 	}
 
 	ensure(c, func() error {
-		return c.cl.RequestActivity(c, key.Encode(), &replaypb.SleepRequest{
-			Duration: ptypes.DurationProto(duration),
+		return c.cl.RequestActivity(c, key, &replaypb.SleepRequest{
+			Duration: durationpb.New(duration),
 		})
 	})
 

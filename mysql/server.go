@@ -1,4 +1,4 @@
-// Package server provides the replay grpc server, a server side logical client and entrypoint to start server side
+// Package mysql provides the replay grpc server, a server side logical client and entrypoint to start server side
 // background loops. It is used when running a replay server or when embedding replay into a user application.
 package mysql
 
@@ -33,22 +33,23 @@ type Server struct {
 	clFunc  func(namespace string) (*DBClient, error)
 }
 
-func (s *Server) clientFromKey(key string) (*DBClient, error) {
+func (s *Server) clientFromKey(key string) (internal.Key, *DBClient, error) {
 	k, err := internal.DecodeKey(key)
 	if err != nil {
-		return nil, err
+		return internal.Key{}, nil, err
 	}
 
-	return s.clFunc(k.Namespace)
+	cl, err := s.clFunc(k.Namespace)
+	return k, cl, err
 }
 
 func (s *Server) RunWorkflow(ctx context.Context, req *pb.RunRequest) (*pb.OK, error) {
-	cl, err := s.clientFromKey(req.Key)
+	key, cl, err := s.clientFromKey(req.Key)
 	if err != nil {
 		return nil, err
 	}
 
-	ok, err := cl.runWorkflowServer(ctx, req.Key, req.Message)
+	ok, err := cl.runWorkflowServer(ctx, key, req.Message)
 	return &pb.OK{Ok: ok}, err
 }
 
@@ -63,57 +64,57 @@ func (s *Server) SignalRun(ctx context.Context, req *pb.SignalRequest) (*pb.OK, 
 }
 
 func (s *Server) RequestActivity(ctx context.Context, req *pb.KeyMessage) (*pb.Empty, error) {
-	cl, err := s.clientFromKey(req.Key)
+	key, cl, err := s.clientFromKey(req.Key)
 	if err != nil {
 		return nil, err
 	}
 
-	return new(pb.Empty), cl.requestActivityServer(ctx, req.Key, req.Message)
+	return new(pb.Empty), cl.requestActivityServer(ctx, key, req.Message)
 }
 
 func (s *Server) RespondActivity(ctx context.Context, req *pb.KeyMessage) (*pb.Empty, error) {
-	cl, err := s.clientFromKey(req.Key)
+	key, cl, err := s.clientFromKey(req.Key)
 	if err != nil {
 		return nil, err
 	}
 
-	return new(pb.Empty), cl.RespondActivityServer(ctx, req.Key, req.Message)
+	return new(pb.Empty), cl.RespondActivityServer(ctx, key, req.Message)
 }
 
 func (s *Server) EmitOutput(ctx context.Context, req *pb.KeyMessage) (*pb.Empty, error) {
-	cl, err := s.clientFromKey(req.Key)
+	key, cl, err := s.clientFromKey(req.Key)
 	if err != nil {
 		return nil, err
 	}
 
-	return new(pb.Empty), cl.emitOutputServer(ctx, req.Key, req.Message)
+	return new(pb.Empty), cl.emitOutputServer(ctx, key, req.Message)
 }
 
 func (s *Server) CompleteRun(ctx context.Context, req *pb.CompleteRequest) (*pb.Empty, error) {
-	cl, err := s.clientFromKey(req.Key)
+	key, cl, err := s.clientFromKey(req.Key)
 	if err != nil {
 		return nil, err
 	}
 
-	return new(pb.Empty), cl.CompleteRun(ctx, req.Key)
+	return new(pb.Empty), cl.CompleteRun(ctx, key)
 }
 
 func (s *Server) RestartRun(ctx context.Context, req *pb.RunRequest) (*pb.Empty, error) {
-	cl, err := s.clientFromKey(req.Key)
+	key, cl, err := s.clientFromKey(req.Key)
 	if err != nil {
 		return nil, err
 	}
 
-	return new(pb.Empty), cl.restartRunServer(ctx, req.Key, req.Message)
+	return new(pb.Empty), cl.restartRunServer(ctx, key, req.Message)
 }
 
 func (s *Server) ListBootstrapEvents(ctx context.Context, req *pb.ListBootstrapRequest) (*pb.Events, error) {
-	cl, err := s.clientFromKey(req.Key)
+	key, cl, err := s.clientFromKey(req.Key)
 	if err != nil {
 		return nil, err
 	}
 
-	el, err := cl.ListBootstrapEvents(ctx, req.Key, req.Before)
+	el, err := cl.ListBootstrapEvents(ctx, key, req.Before)
 	if err != nil {
 		return nil, err
 	}

@@ -728,7 +728,7 @@ func (t *tickCtx) Next() {
 }
 
 // runkey returns a common default run key used in testing.
-func runkey(run string) string {
+func runkey(run string) internal.Key {
 	return internal.MinKey(ns, w, run, 0)
 }
 
@@ -770,14 +770,9 @@ func (c *blockingClient) Internal() internal.Client {
 	return c
 }
 
-func (c *blockingClient) RequestActivity(ctx context.Context, key string, args proto.Message) error {
-	k, err := internal.DecodeKey(key)
-	if err != nil {
-		return err
-	}
-
-	if ok := c.blockActivity[k.Target]; ok {
-		c.blockedChan <- k.Target
+func (c *blockingClient) RequestActivity(ctx context.Context, key internal.Key, args proto.Message) error {
+	if ok := c.blockActivity[key.Target]; ok {
+		c.blockedChan <- key.Target
 		time.Sleep(time.Hour)
 	}
 

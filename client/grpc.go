@@ -38,7 +38,7 @@ func (c *Client) RunWorkflow(ctx context.Context, namespace, workflow, run strin
 	}
 
 	_, err = c.clpb.RunWorkflow(ctx, &pb.RunRequest{
-		Key:     internal.MinKey(namespace, workflow, run, 0),
+		Key:     internal.MinKey(namespace, workflow, run, 0).Encode(),
 		Message: anyMsg,
 	})
 	if errors.Is(err, internal.ErrDuplicate) {
@@ -79,68 +79,68 @@ func (c *Client) SignalRun(ctx context.Context, namespace, workflow, run string,
 	return true, nil
 }
 
-func (c *Client) RequestActivity(ctx context.Context, key string, message proto.Message) error {
+func (c *Client) RequestActivity(ctx context.Context, key internal.Key, message proto.Message) error {
 	anyMsg, err := internal.ToAny(message)
 	if err != nil {
 		return err
 	}
 
 	_, err = c.clpb.RequestActivity(ctx, &pb.KeyMessage{
-		Key:     key,
+		Key:     key.Encode(),
 		Message: anyMsg,
 	})
 	return err
 }
 
-func (c *Client) RespondActivity(ctx context.Context, key string, message proto.Message) error {
+func (c *Client) RespondActivity(ctx context.Context, key internal.Key, message proto.Message) error {
 	anyMsg, err := internal.ToAny(message)
 	if err != nil {
 		return err
 	}
 
 	_, err = c.clpb.RespondActivity(ctx, &pb.KeyMessage{
-		Key:     key,
+		Key:     key.Encode(),
 		Message: anyMsg,
 	})
 	return err
 }
 
-func (c *Client) EmitOutput(ctx context.Context, key string, message proto.Message) error {
+func (c *Client) EmitOutput(ctx context.Context, key internal.Key, message proto.Message) error {
 	anyMsg, err := internal.ToAny(message)
 	if err != nil {
 		return err
 	}
 
 	_, err = c.clpb.EmitOutput(ctx, &pb.KeyMessage{
-		Key:     key,
+		Key:     key.Encode(),
 		Message: anyMsg,
 	})
 	return err
 }
 
-func (c *Client) CompleteRun(ctx context.Context, key string) error {
+func (c *Client) CompleteRun(ctx context.Context, key internal.Key) error {
 	_, err := c.clpb.CompleteRun(ctx, &pb.CompleteRequest{
-		Key: key,
+		Key: key.Encode(),
 	})
 	return err
 }
 
-func (c *Client) RestartRun(ctx context.Context, key string, message proto.Message) error {
+func (c *Client) RestartRun(ctx context.Context, key internal.Key, message proto.Message) error {
 	anyMsg, err := internal.ToAny(message)
 	if err != nil {
 		return err
 	}
 
 	_, err = c.clpb.RestartRun(ctx, &pb.RunRequest{
-		Key:     key,
+		Key:     key.Encode(),
 		Message: anyMsg,
 	})
 	return err
 }
 
-func (c *Client) ListBootstrapEvents(ctx context.Context, key string, before string) ([]reflex.Event, error) {
+func (c *Client) ListBootstrapEvents(ctx context.Context, key internal.Key, before string) ([]reflex.Event, error) {
 	rl, err := c.clpb.ListBootstrapEvents(ctx, &pb.ListBootstrapRequest{
-		Key:    key,
+		Key:    key.Encode(),
 		Before: before,
 	})
 	if err != nil {

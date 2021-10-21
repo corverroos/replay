@@ -160,13 +160,13 @@ func EventFromProto(e *reflexpb.Event) (*reflex.Event, error) {
 	}, nil
 }
 
-func MinKey(namespace, workflow, run string, iteration int) string {
+func MinKey(namespace, workflow, run string, iteration int) Key {
 	return Key{
 		Namespace: namespace,
 		Workflow:  workflow,
 		Run:       run,
 		Iteration: iteration,
-	}.Encode()
+	}
 }
 
 type eventType int
@@ -194,20 +194,20 @@ func Marshal(message proto.Message) ([]byte, error) {
 // Client defines the replay server's internal API. It may only be used by the replay package itself.
 type Client interface {
 	// RequestActivity inserts a ActivityRequest event.
-	RequestActivity(ctx context.Context, key string, message proto.Message) error
+	RequestActivity(ctx context.Context, key Key, message proto.Message) error
 
 	// RespondActivity inserts a ActivityResponse event.
-	RespondActivity(ctx context.Context, key string, message proto.Message) error
+	RespondActivity(ctx context.Context, key Key, message proto.Message) error
 
 	// EmitOutput insets a RunOutput event.
-	EmitOutput(ctx context.Context, key string, message proto.Message) error
+	EmitOutput(ctx context.Context, key Key, message proto.Message) error
 
 	// CompleteRun inserts a RunComplete event.
-	CompleteRun(ctx context.Context, key string) error
+	CompleteRun(ctx context.Context, key Key) error
 
 	// RestartRun completes the current run iteration and start the next iteration with the provided message.
-	RestartRun(ctx context.Context, key string, message proto.Message) error
+	RestartRun(ctx context.Context, key Key, message proto.Message) error
 
 	// ListBootstrapEvents returns the boostrap events for the run before hte provide event ID.
-	ListBootstrapEvents(ctx context.Context, key string, before string) ([]reflex.Event, error)
+	ListBootstrapEvents(ctx context.Context, key Key, before string) ([]reflex.Event, error)
 }

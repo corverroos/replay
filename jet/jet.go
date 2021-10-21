@@ -23,7 +23,7 @@ type Client struct {
 	stream string
 }
 
-func (c Client) RequestActivity(ctx context.Context, key string, message proto.Message) error {
+func (c Client) RequestActivity(ctx context.Context, key internal.Key, message proto.Message) error {
 	b, err := proto.Marshal(message)
 	if err != nil {
 		return err
@@ -43,7 +43,7 @@ func (c Client) RequestActivity(ctx context.Context, key string, message proto.M
 	return err
 }
 
-func (c Client) RespondActivity(ctx context.Context, key string, message proto.Message) error {
+func (c Client) RespondActivity(ctx context.Context, key internal.Key, message proto.Message) error {
 	b, err := proto.Marshal(message)
 	if err != nil {
 		return err
@@ -63,7 +63,7 @@ func (c Client) RespondActivity(ctx context.Context, key string, message proto.M
 	return err
 }
 
-func (c Client) EmitOutput(ctx context.Context, key string, message proto.Message) error {
+func (c Client) EmitOutput(ctx context.Context, key internal.Key, message proto.Message) error {
 	b, err := proto.Marshal(message)
 	if err != nil {
 		return err
@@ -83,7 +83,7 @@ func (c Client) EmitOutput(ctx context.Context, key string, message proto.Messag
 	return err
 }
 
-func (c Client) CompleteRun(ctx context.Context, key string) error {
+func (c Client) CompleteRun(ctx context.Context, key internal.Key) error {
 	sub, err := keyToSubject(key)
 	if err != nil {
 		return err
@@ -97,7 +97,7 @@ func (c Client) CompleteRun(ctx context.Context, key string) error {
 	return err
 }
 
-func (c Client) ListBootstrapEvents(ctx context.Context, key string, before string) ([]reflex.Event, error) {
+func (c Client) ListBootstrapEvents(ctx context.Context, key internal.Key, before string) ([]reflex.Event, error) {
 	sub, err := keyToSubject(key)
 	if err != nil {
 		return nil, err
@@ -135,18 +135,13 @@ func (c Client) ListBootstrapEvents(ctx context.Context, key string, before stri
 	}
 }
 
-func (c Client) RestartRun(ctx context.Context, key string, message proto.Message) error {
-	k, err := internal.DecodeKey(key)
+func (c Client) RestartRun(ctx context.Context, key internal.Key, message proto.Message) error {
+	err := c.CompleteRun(ctx, key)
 	if err != nil {
 		return err
 	}
 
-	err = c.CompleteRun(ctx, key)
-	if err != nil {
-		return err
-	}
-
-	_, err = c.runWorkflow(ctx, k.Namespace, k.Workflow, k.Run, k.Iteration+1, message)
+	_, err = c.runWorkflow(ctx, key.Namespace, key.Workflow, key.Run, key.Iteration+1, message)
 	return err
 }
 
@@ -207,16 +202,11 @@ func (c Client) Internal() internal.Client {
 
 // msgID returns a unique nats msg id publish option for the key and type used for deduplication.
 // See https://docs.nats.io/jetstream/model_deep_dive#message-deduplication.
-func msgID(key string, typ internal.EventType) nats.PubOpt {
-	return nats.MsgId(fmt.Sprintf("%s-%d", key, typ))
+func msgID(key internal.Key, typ internal.EventType) nats.PubOpt {
+	return nats.MsgId(fmt.Sprintf("%s-%d", key.Encode(), typ))
 }
 
-func keyToSubject(key string) (string, error) {
-	k, err := internal.DecodeKey(key)
-	if err != nil {
-		return "", err
-	}
-
+func keyToSubject(k internal.Key) (string, error) {
 	// TODO(corver): Refactor replay API to use typed key instead.
 
 	return strings.Join([]string{
