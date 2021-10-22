@@ -2,6 +2,8 @@ syntax = "proto3";
 
 package testdata;
 
+option go_package = "testdata";
+
 message Empty{}
 
 message String{

@@ -16,7 +16,7 @@ import (
 
 // Step 1 define your proto messages.
 
-//go:generate protoc --go_out=plugins=grpc:. ./testdata.proto
+//go:generate protoc --proto_path=. --go_out=. testdata.proto
 
 // Step 2 define your Backends; a dependency provider interface used by activities.
 

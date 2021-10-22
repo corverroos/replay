@@ -6,8 +6,8 @@ import (
 	"context"
 	"time"
 
-	"github.com/golang/protobuf/proto"
 	"github.com/luno/reflex"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/corverroos/replay"
 	// TODO(corver): Support importing other packages.

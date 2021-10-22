@@ -5,7 +5,7 @@ package {{.PackageName}}
 import (
 	"context"
 	"time"
-	"github.com/golang/protobuf/proto"
+	"google.golang.org/protobuf/proto"
 	"github.com/luno/reflex"
 
 	"github.com/corverroos/replay"
