@@ -22,27 +22,9 @@ const (
 	_oBarO3 = "o3"
 	_aA     = "a"
 	_aB     = "b"
+	_sFooS1 = "s1"
+	_sFooS2 = "s2"
 )
-
-type fooSignal int
-
-const (
-	_sFooS1 fooSignal = 1
-	_sFooS2 fooSignal = 2
-)
-
-var fooSignalMessages = map[fooSignal]proto.Message{
-	_sFooS1: new(Empty),
-	_sFooS2: new(Int),
-}
-
-func (s fooSignal) SignalType() int {
-	return int(s)
-}
-
-func (s fooSignal) MessageType() proto.Message {
-	return fooSignalMessages[s]
-}
 
 // SignalFooS1 provides a typed API for signalling a foo workflow run with signal s1.
 // It returns true on success or false on duplicate calls or an error.

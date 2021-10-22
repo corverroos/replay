@@ -23,33 +23,17 @@ const (
 	{{- range .Activities}}
     _a{{.Pascal}} = "{{.Name}}"
     {{- end}}
+
+{{- range .Workflows}} {{$workflowName := .Name}} {{$workflowCamel := .Camel}} {{$workflowPascal := .Pascal}}
+{{- if .Signals}}
+    {{- range $i, $s := .Signals}}
+    _s{{$workflowPascal}}{{$s.Pascal}} = "{{$s.Name}}"
+    {{- end}}
+{{end}}
+{{end}}
 )
 
 {{range .Workflows}} {{$workflowName := .Name}} {{$workflowCamel := .Camel}} {{$workflowPascal := .Pascal}}
-{{if .Signals}}
-type {{$workflowCamel}}Signal int
-
-const (
-	{{- range $i, $s := .Signals}}
-	_s{{$workflowPascal}}{{$s.Pascal}} {{$workflowCamel}}Signal = {{inc $i}}
-	{{- end}}
-)
-
-var {{$workflowCamel}}SignalMessages = map[{{$workflowCamel}}Signal]proto.Message{
-    {{- range .Signals}}
-	_s{{$workflowPascal}}{{.Pascal}}: new({{.Message}}),
-	{{- end}}
-}
-
-func (s {{$workflowCamel}}Signal) SignalType() int {
-	return int(s)
-}
-
-func (s {{$workflowCamel}}Signal) MessageType() proto.Message {
-	return {{$workflowCamel}}SignalMessages[s]
-}
-{{end}}
-
 {{- range .Signals}}
 // Signal{{$workflowPascal}}{{.Pascal}} provides a typed API for signalling a {{$workflowName}} workflow run with signal {{.Name}}.
 // It returns true on success or false on duplicate calls or an error.
