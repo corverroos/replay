@@ -5,15 +5,16 @@ import (
 	"database/sql"
 	"strings"
 
+	"google.golang.org/protobuf/types/known/anypb"
+
 	"github.com/corverroos/replay/mysql/internal/db"
 	"github.com/corverroos/replay/mysql/internal/sleep"
 
-	"github.com/golang/protobuf/proto"
-	"github.com/golang/protobuf/ptypes/any"
 	"github.com/luno/jettison/errors"
 	"github.com/luno/jettison/j"
 	"github.com/luno/reflex"
 	"github.com/luno/reflex/rsql"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/corverroos/replay"
 	"github.com/corverroos/replay/internal"
@@ -59,7 +60,7 @@ func (c *DBClient) RunWorkflow(ctx context.Context, namespace, workflow, run str
 	return c.runWorkflowServer(ctx, key, apb)
 }
 
-func (c *DBClient) runWorkflowServer(ctx context.Context, key internal.Key, message *any.Any) (bool, error) {
+func (c *DBClient) runWorkflowServer(ctx context.Context, key internal.Key, message *anypb.Any) (bool, error) {
 	b, err := internal.Marshal(message)
 	if err != nil {
 		return false, err
@@ -77,7 +78,7 @@ func (c *DBClient) InsertEvent(ctx context.Context, typ internal.EventType, key 
 	return c.InsertEventRaw(ctx, typ, key, apb)
 }
 
-func (c *DBClient) InsertEventRaw(ctx context.Context, typ internal.EventType, key internal.Key, message *any.Any) error {
+func (c *DBClient) InsertEventRaw(ctx context.Context, typ internal.EventType, key internal.Key, message *anypb.Any) error {
 	b, err := internal.Marshal(message)
 	if err != nil {
 		return err

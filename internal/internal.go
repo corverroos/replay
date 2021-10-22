@@ -9,13 +9,14 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/golang/protobuf/proto"
-	"github.com/golang/protobuf/ptypes"
-	"github.com/golang/protobuf/ptypes/any"
+	"google.golang.org/protobuf/types/known/timestamppb"
+
 	"github.com/luno/jettison/errors"
 	"github.com/luno/jettison/j"
 	"github.com/luno/reflex"
 	"github.com/luno/reflex/reflexpb"
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/anypb"
 )
 
 const SleepTarget = "replay_sleep"
@@ -54,17 +55,12 @@ func ParseMessage(e *reflex.Event) (proto.Message, error) {
 		return nil, nil
 	}
 
-	var a any.Any
+	var a anypb.Any
 	if err := proto.Unmarshal(e.MetaData, &a); err != nil {
 		return nil, errors.Wrap(err, "unmarshal proto")
 	}
 
-	var d ptypes.DynamicAny
-	if err := ptypes.UnmarshalAny(&a, &d); err != nil {
-		return nil, errors.Wrap(err, "unmarshal anypb")
-	}
-
-	return d.Message, nil
+	return a.UnmarshalNew()
 }
 
 type Key struct {
@@ -112,31 +108,21 @@ func DecodeKey(key string) (Key, error) {
 }
 
 func EventToProto(e *reflex.Event) (*reflexpb.Event, error) {
-	ts, err := ptypes.TimestampProto(e.Timestamp)
-	if err != nil {
-		return nil, err
-	}
-
 	return &reflexpb.Event{
 		Id:        e.ID,
 		ForeignId: e.ForeignID,
 		Type:      int32(e.Type.ReflexType()),
-		Timestamp: ts,
+		Timestamp: timestamppb.New(e.Timestamp),
 		Metadata:  e.MetaData,
 	}, nil
 }
 
 func EventFromProto(e *reflexpb.Event) (*reflex.Event, error) {
-	ts, err := ptypes.Timestamp(e.Timestamp)
-	if err != nil {
-		return nil, err
-	}
-
 	return &reflex.Event{
 		ID:        e.Id,
 		ForeignID: e.ForeignId,
 		Type:      eventType(e.Type),
-		Timestamp: ts,
+		Timestamp: e.Timestamp.AsTime(),
 		MetaData:  e.Metadata,
 	}, nil
 }
@@ -156,12 +142,12 @@ func (e eventType) ReflexType() int {
 	return int(e)
 }
 
-func ToAny(message proto.Message) (*any.Any, error) {
+func ToAny(message proto.Message) (*anypb.Any, error) {
 	if message == nil {
 		return nil, nil
 	}
 
-	return ptypes.MarshalAny(message)
+	return anypb.New(message)
 }
 
 func Marshal(message proto.Message) ([]byte, error) {

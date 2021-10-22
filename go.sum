@@ -79,8 +79,8 @@ github.com/cncf/xds/go v0.0.0-20210312221358-fbca930ec8ed/go.mod h1:eXthEFrGJvWH
 github.com/cncf/xds/go v0.0.0-20210805033703-aa0b78936158/go.mod h1:eXthEFrGJvWHgFFCl3hGmgk+/aYT6PnTQLykKQRLhEs=
 github.com/corverroos/delayq v0.0.0-20211013120315-6007daade239 h1:kPryMTRa0oBYVu9m5U3ThKx0zE3KM3hGy+s1F1BlxYs=
 github.com/corverroos/delayq v0.0.0-20211013120315-6007daade239/go.mod h1:mhGhAJUyZvrBhq3Lz6ugfSwSEWeUTP2sULTxMGPZtYA=
-github.com/corverroos/rjet v0.0.0-20211004180859-d0ecf2368082 h1:D3fYc4jIRHtL/JIN9PAeM0AqqotyBdfHKdz1yGDHSLk=
-github.com/corverroos/rjet v0.0.0-20211004180859-d0ecf2368082/go.mod h1:lM62v6dtIjmmbXpX+hm36vzX/T+iVgQ2Im4ou6oaqxM=
+github.com/corverroos/rjet v0.0.0-20211022070538-9715c69b0997 h1:3CfnzBh6X/meQqvR3l23fbrqnP5JrD+5flVVh8Al6UQ=
+github.com/corverroos/rjet v0.0.0-20211022070538-9715c69b0997/go.mod h1:lM62v6dtIjmmbXpX+hm36vzX/T+iVgQ2Im4ou6oaqxM=
 github.com/corverroos/truss v0.0.0-20210514115035-9e5e1b0851a9 h1:NMcmq9Y8hV7r67YGUqQjUU4ri+S6MxyDLRXaT2ptr58=
 github.com/corverroos/truss v0.0.0-20210514115035-9e5e1b0851a9/go.mod h1:A7bhl0W5AgpM1Q6nI72q1JMQhk1vnse/UA0+Nj2ngLQ=
 github.com/dave/dst v0.23.1/go.mod h1:LjPcLEauK4jC5hQ1fE/wr05O41zK91Pr4Qs22Ljq7gs=

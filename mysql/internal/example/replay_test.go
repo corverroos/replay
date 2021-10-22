@@ -10,19 +10,16 @@ import (
 	"testing"
 	"time"
 
-	"github.com/luno/jettison/log"
-
+	"github.com/corverroos/replay"
+	"github.com/corverroos/replay/internal"
 	"github.com/corverroos/replay/mysql/internal/test"
-
-	"github.com/golang/protobuf/proto"
 	"github.com/luno/fate"
 	"github.com/luno/jettison/jtest"
+	"github.com/luno/jettison/log"
 	"github.com/luno/reflex"
 	"github.com/luno/reflex/rsql"
 	"github.com/stretchr/testify/require"
-
-	"github.com/corverroos/replay"
-	"github.com/corverroos/replay/internal"
+	"google.golang.org/protobuf/proto"
 )
 
 const (

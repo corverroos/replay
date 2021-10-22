@@ -7,12 +7,12 @@ import (
 	"context"
 	"strings"
 
-	"github.com/golang/protobuf/proto"
 	"github.com/luno/jettison/errors"
 	"github.com/luno/jettison/j"
 	"github.com/luno/reflex"
 	"github.com/luno/reflex/reflexpb"
 	"google.golang.org/grpc"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/corverroos/replay"
 	"github.com/corverroos/replay/internal"

@@ -6,18 +6,16 @@ import (
 	"testing"
 	"time"
 
+	"github.com/corverroos/replay"
 	"github.com/corverroos/replay/mysql/internal/test"
-
-	"github.com/golang/protobuf/proto"
 	"github.com/luno/fate"
 	"github.com/luno/jettison/jtest"
 	"github.com/luno/jettison/log"
 	"github.com/stretchr/testify/require"
-
-	"github.com/corverroos/replay"
+	"google.golang.org/protobuf/proto"
 )
 
-//go:generate protoc --go_out=plugins=grpc:. ./example.proto
+//go:generate protoc --proto_path=. --go_out=. example.proto
 
 func TestExample(t *testing.T) {
 	_, cl, _, cstore := setup(t)

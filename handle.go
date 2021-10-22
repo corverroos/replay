@@ -1,10 +1,9 @@
 package replay
 
 import (
-	"github.com/golang/protobuf/proto"
-	"github.com/luno/reflex"
-
 	"github.com/corverroos/replay/internal"
+	"github.com/luno/reflex"
+	"google.golang.org/protobuf/proto"
 )
 
 // Handle provides an event handler for custom replay event consumers,

@@ -18,7 +18,6 @@ import (
 
 	"google.golang.org/protobuf/types/known/durationpb"
 
-	"github.com/golang/protobuf/proto"
 	"github.com/luno/fate"
 	"github.com/luno/jettison"
 	"github.com/luno/jettison/errors"
@@ -26,6 +25,7 @@ import (
 	"github.com/luno/jettison/log"
 	"github.com/luno/reflex"
 	"github.com/luno/reflex/rpatterns"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/corverroos/replay/internal"
 	"github.com/corverroos/replay/internal/replaypb"

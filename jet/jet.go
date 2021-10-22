@@ -2,7 +2,6 @@ package jet
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -10,9 +9,9 @@ import (
 
 	"github.com/corverroos/replay/internal"
 	"github.com/corverroos/rjet"
-	"github.com/golang/protobuf/proto"
 	"github.com/luno/reflex"
 	"github.com/nats-io/nats.go"
+	"google.golang.org/protobuf/proto"
 )
 
 const (
@@ -58,44 +57,6 @@ func (c Client) CompleteRun(ctx context.Context, key internal.Key) error {
 	return err
 }
 
-func (c Client) ListBootstrapEvents(ctx context.Context, key internal.Key, to string) ([]reflex.Event, error) {
-	sub, err := keyToSubject(key)
-	if err != nil {
-		return nil, err
-	}
-
-	fmt.Printf("JCR: sub=%+v\n", sub)
-	sub += ".*"
-
-	s, err := rjet.NewStream(c.ncl, c.stream, rjet.WithSubjectFilter(sub))
-	if err != nil {
-		return nil, err
-	}
-
-	// Add timeout just in case before isn't found.
-	ctx, cancel := context.WithTimeout(ctx, time.Second*10)
-	defer cancel()
-
-	sc, err := s.Stream(ctx, "")
-	if err != nil {
-		return nil, err
-	}
-
-	var res []reflex.Event
-	for {
-		e, err := sc.Recv()
-		if err != nil {
-			return nil, err
-		}
-
-		res = append(res, *e)
-
-		if e.ID == to {
-			return res, nil
-		}
-	}
-}
-
 func (c Client) RestartRun(ctx context.Context, key internal.Key, message proto.Message) error {
 	err := c.CompleteRun(ctx, key)
 	if err != nil {
@@ -137,7 +98,75 @@ func (c Client) runWorkflow(ctx context.Context, namespace, workflow, run string
 }
 
 func (c Client) SignalRun(ctx context.Context, namespace, workflow, run string, signal string, message proto.Message, extID string) (bool, error) {
-	return false, errors.New("signal not supported yet")
+	key := internal.Key{
+		Namespace: namespace,
+		Workflow:  workflow,
+		Run:       run,
+		Iteration: -1,
+		Target:    signal,
+		Sequence:  extID,
+	}
+
+	sub, err := keyToSubject(key)
+	if err != nil {
+		return false, err
+	}
+
+	apb, err := internal.ToAny(message)
+	if err != nil {
+		return false, err
+	}
+
+	b, err := proto.Marshal(apb)
+	if err != nil {
+		return false, err
+	}
+
+	m := nats.Msg{
+		Subject: sub,
+		Data:    b,
+	}
+
+	ack, err := c.ncl.PublishMsg(&m, nats.Context(ctx), msgID(key, internal.RunSignal))
+	return ack.Duplicate, err
+}
+
+func (c Client) ListBootstrapEvents(ctx context.Context, key internal.Key, to string) ([]reflex.Event, error) {
+	sub, err := keyToSubject(key)
+	if err != nil {
+		return nil, err
+	}
+
+	fmt.Printf("JCR: sub=%+v\n", sub)
+	sub += ".*"
+
+	s, err := rjet.NewStream(c.ncl, c.stream, rjet.WithSubjectFilter(sub))
+	if err != nil {
+		return nil, err
+	}
+
+	// Add timeout just in case before isn't found.
+	ctx, cancel := context.WithTimeout(ctx, time.Second*10)
+	defer cancel()
+
+	sc, err := s.Stream(ctx, "")
+	if err != nil {
+		return nil, err
+	}
+
+	var res []reflex.Event
+	for {
+		e, err := sc.Recv()
+		if err != nil {
+			return nil, err
+		}
+
+		res = append(res, *e)
+
+		if e.ID == to {
+			return res, nil
+		}
+	}
 }
 
 func (c Client) Stream(namespace, workflow, run string) reflex.StreamFunc {
