@@ -2,9 +2,11 @@ package jet_test
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/corverroos/delayq/dqradix"
 	"github.com/luno/jettison/jtest"
 	"github.com/luno/reflex"
 	"github.com/nats-io/nats.go"
@@ -16,13 +18,14 @@ import (
 )
 
 const (
-	stream = "stream"
+	cursor = "cursor"
+	stream = "replay_stream"
 	ns     = "namespace"
 	w      = "workflow"
 	r      = "run"
 )
 
-func setup(t *testing.T) (nats.JetStreamContext, jet.Client) {
+func setup(t *testing.T) (context.Context, nats.JetStreamContext, jet.Client, dqradix.Client) {
 	c, err := nats.Connect(nats.DefaultURL)
 	jtest.RequireNil(t, err)
 
@@ -40,10 +43,19 @@ func setup(t *testing.T) (nats.JetStreamContext, jet.Client) {
 		}
 	}
 
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	rc := dqradix.NewForTesting(t, cursor)
+	jtest.RequireNil(t, err)
+
 	clean := func() {
-		for _, stream := range []string{stream} {
-			_ = ncl.PurgeStream(stream)
-			_ = ncl.DeleteStream(stream)
+		for sinfo := range ncl.StreamsInfo() {
+			name := sinfo.Config.Name
+			if strings.HasPrefix(name, stream) || strings.HasPrefix(name, "reflex") {
+				_ = ncl.PurgeStream(name)
+				_ = ncl.DeleteStream(name)
+			}
 		}
 	}
 
@@ -58,13 +70,11 @@ func setup(t *testing.T) (nats.JetStreamContext, jet.Client) {
 	_, err = ncl.AddStream(jc.StreamConfig())
 	jtest.RequireNil(t, err)
 
-	return ncl, jc
+	return ctx, ncl, jc, rc
 }
 
 func TestEvents(t *testing.T) {
-	_, cl := setup(t)
-
-	ctx := context.Background()
+	ctx, _, cl, _ := setup(t)
 
 	pb := durationpb.New(time.Second)
 

@@ -6,18 +6,19 @@ import (
 	"time"
 
 	"github.com/corverroos/delayq"
-	"github.com/corverroos/replay"
-	"github.com/corverroos/replay/internal"
-	"github.com/corverroos/replay/internal/replaypb"
 	"github.com/luno/fate"
 	"github.com/luno/jettison/errors"
 	"github.com/luno/jettison/j"
 	"github.com/luno/jettison/log"
 	"github.com/luno/reflex"
 	"google.golang.org/protobuf/types/known/durationpb"
+
+	"github.com/corverroos/replay"
+	"github.com/corverroos/replay/internal"
+	"github.com/corverroos/replay/internal/replaypb"
 )
 
-func RegisterSleeperForTesting(getCtx func() (context.Context, bool), cl replay.Client, cstore reflex.CursorStore, q delayq.Queue) {
+func RegisterSleeperForTesting(getCtx func() (context.Context, bool), cl replay.Client, cstore reflex.CursorStore, q *delayq.Queue) {
 	pollPeriod = time.Millisecond * 10
 	deadlineFunc = func(d *durationpb.Duration) time.Time {
 		return time.Now()
@@ -25,7 +26,7 @@ func RegisterSleeperForTesting(getCtx func() (context.Context, bool), cl replay.
 	RegisterSleeper(getCtx, cl, cstore, q, "")
 }
 
-func RegisterSleeper(getCtx func() (context.Context, bool), cl replay.Client, cstore reflex.CursorStore, q delayq.Queue, cursorPrefix string) {
+func RegisterSleeper(getCtx func() (context.Context, bool), cl replay.Client, cstore reflex.CursorStore, q *delayq.Queue, cursorPrefix string) {
 	fn := func(ctx context.Context, f fate.Fate, e *reflex.Event) error {
 		if !reflex.IsType(e.Type, internal.SleepRequest) {
 			return nil
@@ -42,7 +43,7 @@ func RegisterSleeper(getCtx func() (context.Context, bool), cl replay.Client, cs
 		}
 
 		err = q.AddMsg(ctx, &delayq.Msg{
-			ID:       e.ID,
+			ID:       e.ForeignID,
 			Deadline: deadlineFunc(req.Duration),
 		})
 		if errors.Is(err, delayq.ErrExists) {
@@ -64,11 +65,11 @@ func RegisterSleeper(getCtx func() (context.Context, bool), cl replay.Client, cs
 var (
 	pollPeriod   = time.Second
 	deadlineFunc = func(d *durationpb.Duration) time.Time {
-		return time.Now().Add(time.Duration(d.Seconds) * time.Second)
+		return time.Now().Add(d.AsDuration())
 	}
 )
 
-func completeSleepsForever(getCtx func() (context.Context, bool), cl internal.Client, q delayq.Queue) {
+func completeSleepsForever(getCtx func() (context.Context, bool), cl internal.Client, q *delayq.Queue) {
 	for {
 		ctx, ok := getCtx()
 		if !ok {

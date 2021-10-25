@@ -19,6 +19,7 @@ import (
 
 const (
 	prefix = "replay"
+	keyHdr = "replay_key"
 )
 
 func New(ncl nats.JetStreamContext, stream string) Client {
@@ -132,7 +133,7 @@ func (c Client) SignalRun(ctx context.Context, namespace, workflow, run string, 
 func (c Client) ListBootstrapEvents(ctx context.Context, key internal.Key, to string) ([]reflex.Event, error) {
 
 	stream := func(sub string, after string, to string) ([]reflex.Event, error) {
-		s, err := rjet.NewStream(c.ncl, c.stream, rjet.WithSubjectFilter(sub))
+		s, err := rjet.NewStream(c.ncl, c.stream, rjet.WithSubjectFilter(sub), rjet.WithForeignIDParser(parseForeignID))
 		if err != nil {
 			return nil, err
 		}
@@ -209,15 +210,20 @@ func (c Client) ListBootstrapEvents(ctx context.Context, key internal.Key, to st
 }
 
 func (c Client) Stream(namespace, workflow, run string) reflex.StreamFunc {
-	sub := joinsub(
-		prefix,
-		c.stream,
-		namespace,
-		workflow,
-		run,
-		">")
+	var subl = []string{prefix, c.stream}
 
-	s, err := rjet.NewStream(c.ncl, c.stream, rjet.WithSubjectFilter(sub))
+	func(sl ...string) {
+		for i := 0; i < len(sl); i++ {
+			if sl[i] == "" {
+				return
+			}
+			subl = append(subl, sl[i])
+		}
+	}(namespace, workflow, run)
+
+	subl = append(subl, ">")
+
+	s, err := rjet.NewStream(c.ncl, c.stream, rjet.WithSubjectFilter(joinsub(subl...)), rjet.WithForeignIDParser(parseForeignID))
 	if err != nil {
 		panic("unexpected error" + err.Error())
 	}
@@ -230,11 +236,11 @@ func (c Client) Internal() internal.Client {
 }
 
 func newMsg(stream string, typ reflex.EventType, key internal.Key, data []byte) *nats.Msg {
+	k := key.Encode()
 	h := nats.Header{}
 	rjet.SetTypeHeader(h, typ)
-
-	// See https://docs.nats.io/jetstream/model_deep_dive#message-deduplication.
-	h.Set(nats.MsgIdHdr, fmt.Sprintf("%s-%d", key.Encode(), typ.ReflexType()))
+	h.Set(keyHdr, k)
+	h.Set(nats.MsgIdHdr, fmt.Sprintf("%s-%d", k, typ.ReflexType())) // See https://docs.nats.io/jetstream/model_deep_dive#message-deduplication.
 
 	return &nats.Msg{
 		Subject: keyToSubject(stream, key),
@@ -268,4 +274,8 @@ func keyToSubject(stream string, k internal.Key) string {
 
 func joinsub(strs ...string) string {
 	return strings.Join(strs, ".")
+}
+
+func parseForeignID(msg *nats.Msg) string {
+	return msg.Header.Get(keyHdr)
 }

@@ -9,14 +9,13 @@ import (
 	"strconv"
 	"strings"
 
-	"google.golang.org/protobuf/types/known/timestamppb"
-
 	"github.com/luno/jettison/errors"
 	"github.com/luno/jettison/j"
 	"github.com/luno/reflex"
 	"github.com/luno/reflex/reflexpb"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 const SleepTarget = "replay_sleep"
@@ -83,7 +82,7 @@ func (k Key) Encode() string {
 func DecodeKey(key string) (Key, error) {
 	split := strings.Split(key, "/")
 	if len(split) < 4 || len(split) > 6 {
-		return Key{}, errors.New("invalid key")
+		return Key{}, errors.New("invalid key", j.KS("key", key))
 	}
 	var k Key
 	for i, s := range split {
