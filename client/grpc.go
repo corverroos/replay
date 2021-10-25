@@ -38,7 +38,7 @@ func (c *Client) RunWorkflow(ctx context.Context, namespace, workflow, run strin
 	}
 
 	_, err = c.clpb.RunWorkflow(ctx, &pb.RunRequest{
-		Key:     internal.MinKey(namespace, workflow, run, 0).Encode(),
+		Key:     internal.RunKey(namespace, workflow, run, 0).Encode(),
 		Message: anyMsg,
 	})
 	if errors.Is(err, internal.ErrDuplicate) {

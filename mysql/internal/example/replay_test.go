@@ -65,12 +65,12 @@ func TestRestart(t *testing.T) {
 	awaitCompletes(t, cl, ns, w, r, 5)
 
 	for i := 0; i < 5; i++ {
-		el, err := cl.Internal().ListBootstrapEvents(ctx, internal.MinKey(ns, w, r, i), "")
+		el, err := cl.Internal().ListBootstrapEvents(ctx, internal.RunKey(ns, w, r, i), "")
 		jtest.RequireNil(t, err)
 		require.Len(t, el, 2)
 	}
 
-	el, err := cl.Internal().ListBootstrapEvents(ctx, internal.MinKey(ns, w, r, 6), "")
+	el, err := cl.Internal().ListBootstrapEvents(ctx, internal.RunKey(ns, w, r, 6), "")
 	jtest.RequireNil(t, err)
 	require.Len(t, el, 0)
 }
@@ -736,7 +736,7 @@ func (t *tickCtx) Next() {
 
 // runkey returns a common default run key used in testing.
 func runkey(run string) internal.Key {
-	return internal.MinKey(ns, w, run, 0)
+	return internal.RunKey(ns, w, run, 0)
 }
 
 func newBlockingClient(cl replay.Client, activities ...string) *blockingClient {

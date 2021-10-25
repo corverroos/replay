@@ -35,6 +35,7 @@ func (e EventType) ReflexType() int {
 //go:generate stringer -type=EventType
 
 const (
+	NoopEvent        EventType = 0
 	RunCreated       EventType = 1
 	RunCompleted     EventType = 2
 	RunOutput        EventType = 3
@@ -127,12 +128,25 @@ func EventFromProto(e *reflexpb.Event) (*reflex.Event, error) {
 	}, nil
 }
 
-func MinKey(namespace, workflow, run string, iteration int) Key {
+// RunKey returns a key for run iteration level events; Create/Complete/Restart.
+func RunKey(namespace, workflow, run string, iteration int) Key {
 	return Key{
 		Namespace: namespace,
 		Workflow:  workflow,
 		Run:       run,
 		Iteration: iteration,
+	}
+}
+
+// SignalKey returns a key for run signal event.
+func SignalKey(namespace, workflow, run string, signal string, extID string) Key {
+	return Key{
+		Namespace: namespace,
+		Workflow:  workflow,
+		Run:       run,
+		Iteration: -1,
+		Target:    signal,
+		Sequence:  extID,
 	}
 }
 

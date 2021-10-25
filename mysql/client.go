@@ -55,7 +55,7 @@ func (c *DBClient) RunWorkflow(ctx context.Context, namespace, workflow, run str
 		return false, err
 	}
 
-	key := internal.MinKey(namespace, workflow, run, 0)
+	key := internal.RunKey(namespace, workflow, run, 0)
 
 	return c.runWorkflowServer(ctx, key, apb)
 }
@@ -103,14 +103,7 @@ func (c *DBClient) SignalRun(ctx context.Context, namespace, workflow, run strin
 		return false, err
 	}
 
-	key := internal.Key{
-		Namespace: namespace,
-		Workflow:  workflow,
-		Run:       run,
-		Iteration: -1,
-		Target:    signal,
-		Sequence:  extID,
-	}
+	key := internal.SignalKey(namespace, workflow, run, signal, extID)
 
 	return swallowErrDup(db.Insert(ctx, c.dbc, c.events, key, internal.RunSignal, b))
 }

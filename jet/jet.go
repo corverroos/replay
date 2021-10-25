@@ -3,60 +3,81 @@ package jet
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
 
-	"github.com/corverroos/replay/internal"
 	"github.com/corverroos/rjet"
+	"github.com/luno/jettison/errors"
 	"github.com/luno/reflex"
 	"github.com/nats-io/nats.go"
 	"google.golang.org/protobuf/proto"
+
+	"github.com/corverroos/replay/internal"
 )
 
 const (
 	prefix = "replay"
 )
 
+func New(ncl nats.JetStreamContext, stream string) Client {
+	return Client{
+		ncl:    ncl,
+		stream: stream,
+	}
+}
+
 type Client struct {
 	ncl    nats.JetStreamContext
 	stream string
 }
 
+// StreamConfig returns the config of the underlying nats stream.
+func (c Client) StreamConfig() *nats.StreamConfig {
+	return &nats.StreamConfig{
+		Name:        c.stream,
+		Description: "replay stream",
+		Subjects:    []string{joinsub(prefix, c.stream, ">")},
+		Retention:   nats.LimitsPolicy,
+		Discard:     nats.DiscardOld,
+		MaxAge:      time.Hour * 24 * 30 * 6, // 6 months.
+		Storage:     nats.FileStorage,
+		Replicas:    0, // TODO(corver): Non zero probably
+		Duplicates:  time.Minute * 5,
+	}
+}
+
+// InsertEvent inserts the event (type, key, message) into the stream.
+// It is a method on the internal.Client interface.
 func (c Client) InsertEvent(ctx context.Context, typ internal.EventType, key internal.Key, message proto.Message) error {
+	_, err := c.insertEvent(ctx, typ, key, message)
+	return err
+}
+
+func (c Client) insertEvent(ctx context.Context, typ internal.EventType, key internal.Key, message proto.Message) (uint64, error) {
 	b, err := proto.Marshal(message)
 	if err != nil {
-		return err
+		return 0, err
 	}
 
-	sub, err := keyToSubject(key)
-	if err != nil {
-		return err
-	}
+	m := newMsg(c.stream, typ, key, b)
 
-	m := nats.Msg{
-		Subject: sub,
-		Data:    b,
-	}
-
-	_, err = c.ncl.PublishMsg(&m, nats.Context(ctx), msgID(key, typ))
-	return err
+	ack, err := c.ncl.PublishMsg(m, nats.Context(ctx))
+	return ack.Sequence, err
 }
 
+// CompleteRun inserts a RunCompleted event for key.
+// It is a method on the internal.Client interface.
 func (c Client) CompleteRun(ctx context.Context, key internal.Key) error {
-	sub, err := keyToSubject(key)
-	if err != nil {
-		return err
-	}
+	m := newMsg(c.stream, internal.RunCompleted, key, nil)
 
-	m := nats.Msg{
-		Subject: sub,
-	}
-
-	_, err = c.ncl.PublishMsg(&m, nats.Context(ctx), msgID(key, internal.RunCompleted))
+	_, err := c.ncl.PublishMsg(m, nats.Context(ctx))
 	return err
 }
 
+// RestartRun inserts a RunCompleted and a RunCreated event for key.
+// It is a method on the internal.Client interface.
 func (c Client) RestartRun(ctx context.Context, key internal.Key, message proto.Message) error {
 	err := c.CompleteRun(ctx, key)
 	if err != nil {
@@ -72,24 +93,16 @@ func (c Client) RunWorkflow(ctx context.Context, namespace, workflow, run string
 }
 
 func (c Client) runWorkflow(ctx context.Context, namespace, workflow, run string, iter int, message proto.Message) (bool, error) {
-	key := internal.MinKey(namespace, workflow, run, iter)
+	key := internal.RunKey(namespace, workflow, run, iter)
 
 	b, err := proto.Marshal(message)
 	if err != nil {
 		return false, err
 	}
 
-	sub, err := keyToSubject(key)
-	if err != nil {
-		return false, err
-	}
+	m := newMsg(c.stream, internal.RunCreated, key, b)
 
-	m := nats.Msg{
-		Subject: sub,
-		Data:    b,
-	}
-
-	ack, err := c.ncl.PublishMsg(&m, nats.Context(ctx), msgID(key, internal.RunCompleted))
+	ack, err := c.ncl.PublishMsg(m, nats.Context(ctx))
 	if err != nil {
 		return false, err
 	}
@@ -98,19 +111,7 @@ func (c Client) runWorkflow(ctx context.Context, namespace, workflow, run string
 }
 
 func (c Client) SignalRun(ctx context.Context, namespace, workflow, run string, signal string, message proto.Message, extID string) (bool, error) {
-	key := internal.Key{
-		Namespace: namespace,
-		Workflow:  workflow,
-		Run:       run,
-		Iteration: -1,
-		Target:    signal,
-		Sequence:  extID,
-	}
-
-	sub, err := keyToSubject(key)
-	if err != nil {
-		return false, err
-	}
+	key := internal.SignalKey(namespace, workflow, run, signal, extID)
 
 	apb, err := internal.ToAny(message)
 	if err != nil {
@@ -122,61 +123,99 @@ func (c Client) SignalRun(ctx context.Context, namespace, workflow, run string, 
 		return false, err
 	}
 
-	m := nats.Msg{
-		Subject: sub,
-		Data:    b,
-	}
+	m := newMsg(c.stream, internal.RunSignal, key, b)
 
-	ack, err := c.ncl.PublishMsg(&m, nats.Context(ctx), msgID(key, internal.RunSignal))
-	return ack.Duplicate, err
+	ack, err := c.ncl.PublishMsg(m, nats.Context(ctx))
+	return !ack.Duplicate, err
 }
 
 func (c Client) ListBootstrapEvents(ctx context.Context, key internal.Key, to string) ([]reflex.Event, error) {
-	sub, err := keyToSubject(key)
-	if err != nil {
-		return nil, err
-	}
 
-	fmt.Printf("JCR: sub=%+v\n", sub)
-	sub += ".*"
-
-	s, err := rjet.NewStream(c.ncl, c.stream, rjet.WithSubjectFilter(sub))
-	if err != nil {
-		return nil, err
-	}
-
-	// Add timeout just in case before isn't found.
-	ctx, cancel := context.WithTimeout(ctx, time.Second*10)
-	defer cancel()
-
-	sc, err := s.Stream(ctx, "")
-	if err != nil {
-		return nil, err
-	}
-
-	var res []reflex.Event
-	for {
-		e, err := sc.Recv()
+	stream := func(sub string, after string, to string) ([]reflex.Event, error) {
+		s, err := rjet.NewStream(c.ncl, c.stream, rjet.WithSubjectFilter(sub))
 		if err != nil {
 			return nil, err
 		}
 
-		res = append(res, *e)
+		// Add timeout just in case 'to' isn't found.
+		ctx, cancel := context.WithTimeout(ctx, time.Minute)
+		defer cancel()
 
-		if e.ID == to {
-			return res, nil
+		sc, err := s.Stream(ctx, after, reflex.WithStreamToHead())
+		if err != nil {
+			return nil, err
+		}
+
+		var res []reflex.Event
+		for {
+			e, err := sc.Recv()
+			if errors.Is(err, reflex.ErrHeadReached) {
+				return res, nil
+			} else if err != nil {
+				return nil, err
+			}
+
+			res = append(res, *e)
+
+			if e.ID == to {
+				return res, nil
+			}
 		}
 	}
+
+	sub := joinsub(
+		prefix,
+		c.stream,
+		key.Namespace,
+		key.Workflow,
+		key.Run,
+		strconv.Itoa(key.Iteration),
+		">")
+
+	el, err := stream(sub, "", to)
+	if err != nil || len(el) == 0 {
+		return nil, err
+	}
+
+	// Stream signals that overlap with run iteration.
+
+	// Insert noop to ensure stream can complete
+	noop := internal.SignalKey(key.Namespace, key.Workflow, key.Run, "noop", strconv.FormatInt(time.Now().Unix(), 10))
+	noopSeq, err := c.insertEvent(ctx, internal.NoopEvent, noop, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	sub = joinsub(
+		prefix,
+		c.stream,
+		key.Namespace,
+		key.Workflow,
+		key.Run,
+		strconv.Itoa(-1),
+		">")
+
+	sl, err := stream(sub, el[0].ID, strconv.FormatUint(noopSeq, 10))
+	if err != nil {
+		return nil, err
+	}
+
+	el = append(el, sl...)
+	sort.Slice(el, func(i, j int) bool {
+		return el[i].IDInt() < el[j].IDInt()
+	})
+
+	return el, nil
 }
 
 func (c Client) Stream(namespace, workflow, run string) reflex.StreamFunc {
-	sub := strings.Join([]string{
+	sub := joinsub(
 		prefix,
+		c.stream,
 		namespace,
 		workflow,
 		run,
-		"*",
-	}, ".")
+		">")
 
 	s, err := rjet.NewStream(c.ncl, c.stream, rjet.WithSubjectFilter(sub))
 	if err != nil {
@@ -190,22 +229,43 @@ func (c Client) Internal() internal.Client {
 	return c
 }
 
-// msgID returns a unique nats msg id publish option for the key and type used for deduplication.
-// See https://docs.nats.io/jetstream/model_deep_dive#message-deduplication.
-func msgID(key internal.Key, typ internal.EventType) nats.PubOpt {
-	return nats.MsgId(fmt.Sprintf("%s-%d", key.Encode(), typ))
+func newMsg(stream string, typ reflex.EventType, key internal.Key, data []byte) *nats.Msg {
+	h := nats.Header{}
+	rjet.SetTypeHeader(h, typ)
+
+	// See https://docs.nats.io/jetstream/model_deep_dive#message-deduplication.
+	h.Set(nats.MsgIdHdr, fmt.Sprintf("%s-%d", key.Encode(), typ.ReflexType()))
+
+	return &nats.Msg{
+		Subject: keyToSubject(stream, key),
+		Header:  h,
+		Data:    data,
+	}
 }
 
-func keyToSubject(k internal.Key) (string, error) {
-	// TODO(corver): Refactor replay API to use typed key instead.
+func keyToSubject(stream string, k internal.Key) string {
+	if k.Target == "" {
+		return joinsub(
+			prefix,
+			stream,
+			k.Namespace,
+			k.Workflow,
+			k.Run,
+			strconv.Itoa(k.Iteration),
+			"_")
+	}
 
-	return strings.Join([]string{
+	return joinsub(
 		prefix,
+		stream,
 		k.Namespace,
 		k.Workflow,
 		k.Run,
 		strconv.Itoa(k.Iteration),
 		k.Target,
-		k.Sequence,
-	}, "."), nil
+		k.Sequence)
+}
+
+func joinsub(strs ...string) string {
+	return strings.Join(strs, ".")
 }

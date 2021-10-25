@@ -194,6 +194,8 @@ func RegisterWorkflow(getCtx func() context.Context, cl Client, cstore reflex.Cu
 			return nil
 		case internal.SleepRequest.ReflexType():
 			return nil
+		case internal.NoopEvent.ReflexType():
+			return nil
 		default:
 			return errors.New("bug: unknown type", j.KV("type", e.Type))
 		}
@@ -429,7 +431,7 @@ func (s *wcState) StartRun(ctx context.Context, e *reflex.Event, key internal.Ke
 			reflect.ValueOf(message),
 		})
 
-		rc.writer.CompleteRun(rctx, internal.MinKey(s.namespace, s.workflow, key.Run, key.Iteration))
+		rc.writer.CompleteRun(rctx, internal.RunKey(s.namespace, s.workflow, key.Run, key.Iteration))
 
 		s.metrics.IncComplete(time.Since(e.Timestamp))
 	}()
@@ -440,7 +442,7 @@ func (s *wcState) StartRun(ctx context.Context, e *reflex.Event, key internal.Ke
 // bootstrapRun bootstraps a previously started run by replaying all previous events. It returns
 // true if the run is still active after bootstrapping.
 func (s *wcState) bootstrapRun(ctx context.Context, run string, iter int, to string) (bool, error) {
-	el, err := s.cl.ListBootstrapEvents(ctx, internal.MinKey(s.namespace, s.workflow, run, iter), to)
+	el, err := s.cl.ListBootstrapEvents(ctx, internal.RunKey(s.namespace, s.workflow, run, iter), to)
 	if err != nil {
 		return false, errors.Wrap(err, "list responses")
 	}
@@ -511,8 +513,6 @@ func (s *wcState) bootstrapRun(ctx context.Context, run string, iter int, to str
 				}
 				return false, nil
 			}
-		} else {
-			return false, errors.New("unsupported bootstrap type")
 		}
 
 		if e.ID == to {
@@ -618,7 +618,7 @@ type RunContext struct {
 func (c *RunContext) Restart(message proto.Message) {
 	// TODO(corver): Maybe add Option to transfer bufferedSignals.
 
-	c.writer.RestartRun(c, internal.MinKey(c.namespace, c.workflow, c.run, c.iter), message)
+	c.writer.RestartRun(c, internal.RunKey(c.namespace, c.workflow, c.run, c.iter), message)
 
 	panic(errRestart)
 }

@@ -4,7 +4,7 @@ go 1.17
 
 require (
 	github.com/corverroos/delayq v0.0.0-20211013120315-6007daade239
-	github.com/corverroos/rjet v0.0.0-20211022070538-9715c69b0997
+	github.com/corverroos/rjet v0.0.0-20211025122543-afdd64e60f15
 	github.com/corverroos/truss v0.0.0-20210514115035-9e5e1b0851a9
 	github.com/dgryski/go-jump v0.0.0-20170409065014-e1f439676b57
 	github.com/go-sql-driver/mysql v1.4.1
