@@ -55,7 +55,7 @@ func Run{{$workflowPascal}}(ctx context.Context, cl replay.Client, run string, m
 func Register{{.Pascal}}(getCtx func() context.Context, cl replay.Client, cstore reflex.CursorStore,
     {{.Camel}} func({{.Camel}}Flow, *{{.Input}}), opts ...replay.Option) {
 
-    {{.Camel}}Func := func(ctx replay.RunContext, message *{{.Input}}) {
+    {{.Camel}}Func := func(ctx *replay.RunContext, message *{{.Input}}) {
         {{.Camel}}({{.Camel}}FlowImpl{ctx}, message)
     }
 
@@ -79,7 +79,7 @@ func startReplayLoops(getCtx func() context.Context, cl replay.Client, cstore re
     {{range .Workflows}} {{.Camel}} func({{.Camel}}Flow, *{{.Input}}), {{end}} ){
 
 	{{range .Workflows}}
-	{{.Camel}}Func := func(ctx replay.RunContext, message *{{.Input}}) {
+	{{.Camel}}Func := func(ctx *replay.RunContext, message *{{.Input}}) {
 		{{.Camel}}({{.Camel}}FlowImpl{ctx}, message)
 	}
 	replay.RegisterWorkflow(getCtx, cl, cstore, _ns, {{.Camel}}Func, replay.WithName(_w{{.Pascal}}))
@@ -141,7 +141,7 @@ type {{.Camel}}Flow interface {
 }
 
 type {{.Camel}}FlowImpl struct {
-	ctx replay.RunContext
+	ctx *replay.RunContext
 }
 
 func (f {{.Camel}}FlowImpl) Sleep(d time.Duration) {

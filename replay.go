@@ -16,8 +16,8 @@ import (
 	"sync"
 	"time"
 
-	"google.golang.org/protobuf/types/known/durationpb"
-
+	"github.com/corverroos/replay/internal"
+	"github.com/corverroos/replay/internal/replaypb"
 	"github.com/luno/fate"
 	"github.com/luno/jettison"
 	"github.com/luno/jettison/errors"
@@ -26,9 +26,7 @@ import (
 	"github.com/luno/reflex"
 	"github.com/luno/reflex/rpatterns"
 	"google.golang.org/protobuf/proto"
-
-	"github.com/corverroos/replay/internal"
-	"github.com/corverroos/replay/internal/replaypb"
+	"google.golang.org/protobuf/types/known/durationpb"
 )
 
 var debug = flag.Bool("replay_debug", false, "Verbose logging for debugging purposes")
@@ -180,7 +178,7 @@ func RegisterWorkflow(getCtx func() context.Context, cl Client, cstore reflex.Cu
 		case internal.RunCreated.ReflexType():
 			metrics.IncStart()
 			logDebug(ctx, "starting run", j.KS("key", key.Encode()))
-			_, err := s.StartRun(ctx, e, key, message)
+			_, err := s.StartRun(ctx, e, key, message, nil)
 			return err
 		case internal.ActivityResponse.ReflexType(), internal.SleepResponse.ReflexType():
 			_, err := s.RespondActivity(ctx, e, key, message, false)
@@ -224,6 +222,9 @@ type runState struct {
 	//  ackChan is used by the run goroutine to signal the main workflow consumer
 	// that it has progressed to the next checkpoint (await or complete) or not (panic or cancel).
 	ackChan chan ack
+
+	// clearBootstrap is called by the workflow consumer when it has completed bootstrapping.
+	clearBootstrap func()
 }
 
 // response is an activity response passed from the workflow consumer to a run goroutine.
@@ -344,12 +345,28 @@ type wcState struct {
 	runs map[string]*runState
 }
 
+func (s *wcState) ClearBootstrap(key internal.Key) error {
+	s.Lock()
+	defer s.Unlock()
+
+	rs, ok := s.runs[key.Run]
+	if !ok {
+		return errors.New("bug: cannot clear bootstrap")
+	}
+
+	rs.clearBootstrap()
+
+	return nil
+}
+
 // StartRun starts a run goroutine and registers it with the wcState. The run goroutine will call
 // the workflow function with the provided message. It blocks until an ack is received from the run goroutine.
 // It returns true if the run is still active (awaiting first activity response).
 //
 // TODO(corver): Dont start a run if a RunCompleted event already present (when reprocessing due to re-shard cursor reset).
-func (s *wcState) StartRun(ctx context.Context, e *reflex.Event, key internal.Key, message proto.Message) (bool, error) {
+func (s *wcState) StartRun(ctx context.Context, e *reflex.Event, key internal.Key,
+	message proto.Message, bootstrapEvents []reflex.Event) (bool, error) {
+
 	s.Lock()
 	defer s.Unlock()
 
@@ -392,11 +409,27 @@ func (s *wcState) StartRun(ctx context.Context, e *reflex.Event, key internal.Ke
 			s.Unlock()
 		}()
 
-		s.run(rctx, e, key.Run, key.Iteration, message, rs)
+		rc := &RunContext{
+			Context:     ctx,
+			namespace:   s.namespace,
+			workflow:    s.workflow,
+			run:         key.Run,
+			iter:        key.Iteration,
+			state:       rs,
+			createEvent: e,
+			lastEvent:   e,
+			indexes:     make(map[tuple]int),
+			writer:      &eventWriter{bootstrapEvents: bootstrapEvents, cl: s.cl},
+		}
 
-		ensure(rctx, func() error {
-			return s.cl.CompleteRun(rctx, internal.MinKey(s.namespace, s.workflow, key.Run, key.Iteration))
+		rs.clearBootstrap = rc.writer.ClearBootstrap
+
+		reflect.ValueOf(s.workflowFunc).Call([]reflect.Value{
+			reflect.ValueOf(rc),
+			reflect.ValueOf(message),
 		})
+
+		rc.writer.CompleteRun(rctx, internal.MinKey(s.namespace, s.workflow, key.Run, key.Iteration))
 
 		s.metrics.IncComplete(time.Since(e.Timestamp))
 	}()
@@ -438,8 +471,15 @@ func (s *wcState) bootstrapRun(ctx context.Context, run string, iter int, to str
 			return false, errors.New("bug: unexpected first event", j.KV("type", e.Type))
 		}
 
+		if e.ID == to {
+			err := s.ClearBootstrap(key)
+			if err != nil {
+				return false, err
+			}
+		}
+
 		if reflex.IsType(e.Type, internal.RunCreated) {
-			active, err := s.StartRun(ctx, &e, key, message)
+			active, err := s.StartRun(ctx, &e, key, message, el)
 			if err != nil {
 				return active, err
 			} else if !active {
@@ -557,29 +597,6 @@ func (s *wcState) EnqueueSignal(ctx context.Context, e *reflex.Event, key intern
 	return active, err
 }
 
-func (s *wcState) run(ctx context.Context, e *reflex.Event, run string, iter int, message proto.Message, state *runState) {
-	args := []reflect.Value{
-		reflect.ValueOf(RunContext{
-			Context:     ctx,
-			namespace:   s.namespace,
-			workflow:    s.workflow,
-			run:         run,
-			iter:        iter,
-			state:       state,
-			cl:          s.cl,
-			createEvent: e,
-			lastEvent:   e,
-			indexes: make(map[struct {
-				Type   internal.EventType
-				Target string
-			}]int),
-		}),
-		reflect.ValueOf(message),
-	}
-
-	reflect.ValueOf(s.workflowFunc).Call(args)
-}
-
 // RunContext provides the replay API for a workflow function.
 type RunContext struct {
 	context.Context
@@ -588,24 +605,20 @@ type RunContext struct {
 	run       string
 	iter      int
 	state     *runState
-	cl        internal.Client
+	writer    *eventWriter
 
 	createEvent *reflex.Event
 	lastEvent   *reflex.Event
 
 	//  indexes maintains the request index/sequence per target. The nth time a run calls an activity/output.
-	indexes map[struct {
-		Type   internal.EventType
-		Target string
-	}]int
+	indexes map[tuple]int
 }
 
 // Restart completes the current run iteration and start the next iteration with the provided message.
 func (c *RunContext) Restart(message proto.Message) {
-	// TODO(corver): Maybe add Option to drain bufferedSignals.
-	ensure(c, func() error {
-		return c.cl.RestartRun(c, internal.MinKey(c.namespace, c.workflow, c.run, c.iter), message)
-	})
+	// TODO(corver): Maybe add Option to transfer bufferedSignals.
+
+	c.writer.RestartRun(c, internal.MinKey(c.namespace, c.workflow, c.run, c.iter), message)
 
 	panic(errRestart)
 }
@@ -632,9 +645,7 @@ func (c *RunContext) ExecActivity(activityFunc interface{}, message proto.Messag
 		Sequence:  c.getAndInc(internal.ActivityRequest, activity),
 	}
 
-	ensure(c, func() error {
-		return c.cl.InsertEvent(c, internal.ActivityRequest, key, message)
-	})
+	c.writer.InsertEvent(c, internal.ActivityRequest, key, message)
 
 	res := c.state.AwaitActivity(c, key)
 	c.lastEvent = res.event
@@ -658,10 +669,9 @@ func (c *RunContext) AwaitSignal(signal string, duration time.Duration) (proto.M
 		Target:    signal,
 		Sequence:  c.getAndInc(internal.SleepRequest, signal),
 	}
-	ensure(c, func() error {
-		return c.cl.InsertEvent(c, internal.SleepRequest, key, &replaypb.SleepRequest{
-			Duration: durationpb.New(duration),
-		})
+
+	c.writer.InsertEvent(c, internal.SleepRequest, key, &replaypb.SleepRequest{
+		Duration: durationpb.New(duration),
 	})
 
 	res := c.state.AwaitSignal(c, signal, key)
@@ -682,9 +692,7 @@ func (c *RunContext) EmitOutput(output string, message proto.Message) {
 		Target:    output,
 		Sequence:  c.getAndInc(internal.RunOutput, output),
 	}
-	ensure(c, func() error {
-		return c.cl.InsertEvent(c, internal.RunOutput, key, message)
-	})
+	c.writer.InsertEvent(c, internal.RunOutput, key, message)
 }
 
 // Sleep blocks for at least d duration.
@@ -701,10 +709,8 @@ func (c *RunContext) Sleep(duration time.Duration) {
 		Sequence:  c.getAndInc(internal.SleepRequest, internal.SleepTarget),
 	}
 
-	ensure(c, func() error {
-		return c.cl.InsertEvent(c, internal.SleepRequest, key, &replaypb.SleepRequest{
-			Duration: durationpb.New(duration),
-		})
+	c.writer.InsertEvent(c, internal.SleepRequest, key, &replaypb.SleepRequest{
+		Duration: durationpb.New(duration),
 	})
 
 	c.state.AwaitActivity(c, key)
@@ -727,21 +733,20 @@ func (c *RunContext) Run() string {
 	return c.run
 }
 
+type tuple struct {
+	Type   internal.EventType
+	Target string
+}
+
 // getAndInc returns the current target index value and then increments it.
 func (c *RunContext) getAndInc(typ internal.EventType, target string) string {
-	tuple := struct {
-		Type   internal.EventType
-		Target string
-	}{
-		Type:   typ,
-		Target: target,
-	}
+	t := tuple{Type: typ, Target: target}
 
 	defer func() {
-		c.indexes[tuple]++
+		c.indexes[t]++
 	}()
 
-	return strconv.Itoa(c.indexes[tuple])
+	return strconv.Itoa(c.indexes[t])
 }
 
 // awaitAck waits for an ack from the run goroutine.
@@ -810,6 +815,49 @@ func getFunctionName(i interface{}) string {
 	return strings.TrimSuffix(shortName, "-fm")
 }
 
+type eventWriter struct {
+	cl              internal.Client
+	bootstrapEvents []reflex.Event
+}
+
+func (w *eventWriter) ClearBootstrap() {
+	w.bootstrapEvents = nil
+}
+
+func (w *eventWriter) InsertEvent(ctx context.Context, typ internal.EventType, key internal.Key, msg proto.Message) {
+	if len(w.bootstrapEvents) > 0 {
+		k := key.Encode()
+
+		// Skip event if part of bootstrap list.
+		for _, e := range w.bootstrapEvents {
+			if e.ForeignID == k {
+				return
+			}
+		}
+
+		// Only allow new outputs during bootstrap.
+		if typ != internal.RunOutput {
+			panic(errors.Wrap(errLogicChanged, "unexpected event during bootstrap", j.KS("key", k)))
+		}
+	}
+
+	ensure(ctx, func() error {
+		return w.cl.InsertEvent(ctx, typ, key, msg)
+	})
+}
+
+func (w *eventWriter) CompleteRun(ctx context.Context, key internal.Key) {
+	ensure(ctx, func() error {
+		return w.cl.CompleteRun(ctx, key)
+	})
+}
+
+func (w *eventWriter) RestartRun(ctx context.Context, key internal.Key, msg proto.Message) {
+	ensure(ctx, func() error {
+		return w.cl.RestartRun(ctx, key, msg)
+	})
+}
+
 // ensure retries the function until no error is returned or the context is canceled.
 func ensure(ctx context.Context, fn func() error) {
 	for {
@@ -865,7 +913,7 @@ func validateWorkflow(workflowFunc interface{}) error {
 
 	if !checkParams(t.NumIn, t.In, anyType, protoType) || t.In(0) != runCtxType {
 		return errors.New("invalid workflow function, input parameters not " +
-			"replay.RunContext, proto.Message: " + t.String())
+			"*replay.RunContext, proto.Message: " + t.String())
 	}
 
 	if !checkParams(t.NumOut, t.Out) {
@@ -900,4 +948,4 @@ var fateType = reflect.TypeOf((*fate.Fate)(nil)).Elem()
 var protoType = reflect.TypeOf((*proto.Message)(nil)).Elem()
 var errorType = reflect.TypeOf((*error)(nil)).Elem()
 var anyType = reflect.TypeOf((*interface{})(nil)).Elem()
-var runCtxType = reflect.TypeOf(RunContext{})
+var runCtxType = reflect.TypeOf(new(RunContext))

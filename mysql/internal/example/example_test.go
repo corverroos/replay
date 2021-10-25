@@ -85,7 +85,7 @@ type Backends struct {
 	Replay replay.Client
 }
 
-func GreetingWorkflow(ctx replay.RunContext, name *String) {
+func GreetingWorkflow(ctx *replay.RunContext, name *String) {
 	for i := 0; i < 5; i++ {
 		name = ctx.ExecActivity(EnrichGreeting, name).(*String)
 	}
@@ -93,7 +93,7 @@ func GreetingWorkflow(ctx replay.RunContext, name *String) {
 	ctx.ExecActivity(PrintGreeting, name)
 }
 
-func SleepWorkflow(ctx replay.RunContext, _ *Empty) {
+func SleepWorkflow(ctx *replay.RunContext, _ *Empty) {
 	for i := 0; i < 10; i++ {
 		ctx.Sleep(time.Hour * 24 * 365)
 	}
@@ -101,7 +101,7 @@ func SleepWorkflow(ctx replay.RunContext, _ *Empty) {
 	ctx.ExecActivity(PrintGreeting, &String{Value: "sleepy head"})
 }
 
-func SignalWorkflow(ctx replay.RunContext, _ *Empty) {
+func SignalWorkflow(ctx *replay.RunContext, _ *Empty) {
 	var sum int
 	for i := 0; i < 10; i++ {
 		ctx.ExecActivity(MaybeSignal, &Int{Value: int64(i)})

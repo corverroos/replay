@@ -30,7 +30,7 @@ func RunFoo(ctx context.Context, cl replay.Client, run string, message *testdata
 func RegisterFoo(getCtx func() context.Context, cl replay.Client, cstore reflex.CursorStore,
 	foo func(fooFlow, *testdata.Empty), opts ...replay.Option) {
 
-	fooFunc := func(ctx replay.RunContext, message *testdata.Empty) {
+	fooFunc := func(ctx *replay.RunContext, message *testdata.Empty) {
 		foo(fooFlowImpl{ctx}, message)
 	}
 
@@ -82,7 +82,7 @@ type fooFlow interface {
 }
 
 type fooFlowImpl struct {
-	ctx replay.RunContext
+	ctx *replay.RunContext
 }
 
 func (f fooFlowImpl) Sleep(d time.Duration) {

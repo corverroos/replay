@@ -54,12 +54,12 @@ func RunBar(ctx context.Context, cl replay.Client, run string, message *Empty) (
 func startReplayLoops(getCtx func() context.Context, cl replay.Client, cstore reflex.CursorStore, b Backends,
 	foo func(fooFlow, *String), bar func(barFlow, *Empty)) {
 
-	fooFunc := func(ctx replay.RunContext, message *String) {
+	fooFunc := func(ctx *replay.RunContext, message *String) {
 		foo(fooFlowImpl{ctx}, message)
 	}
 	replay.RegisterWorkflow(getCtx, cl, cstore, _ns, fooFunc, replay.WithName(_wFoo))
 
-	barFunc := func(ctx replay.RunContext, message *Empty) {
+	barFunc := func(ctx *replay.RunContext, message *Empty) {
 		bar(barFlowImpl{ctx}, message)
 	}
 	replay.RegisterWorkflow(getCtx, cl, cstore, _ns, barFunc, replay.WithName(_wBar))
@@ -121,7 +121,7 @@ type fooFlow interface {
 }
 
 type fooFlowImpl struct {
-	ctx replay.RunContext
+	ctx *replay.RunContext
 }
 
 func (f fooFlowImpl) Sleep(d time.Duration) {
@@ -272,7 +272,7 @@ type barFlow interface {
 }
 
 type barFlowImpl struct {
-	ctx replay.RunContext
+	ctx *replay.RunContext
 }
 
 func (f barFlowImpl) Sleep(d time.Duration) {

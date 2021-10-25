@@ -32,7 +32,7 @@ const (
 func TestNoopWorkflow(t *testing.T) {
 	ctx, cl, _, cstore := setup(t)
 
-	noopFunc := func(ctx replay.RunContext, _ *Empty) {}
+	noopFunc := func(ctx *replay.RunContext, _ *Empty) {}
 
 	replay.RegisterWorkflow(oneCtx(t), cl, cstore, ns, noopFunc, replay.WithName(w))
 
@@ -48,7 +48,7 @@ func TestNoopWorkflow(t *testing.T) {
 func TestRestart(t *testing.T) {
 	ctx, cl, _, cstore := setup(t)
 
-	restart := func(ctx replay.RunContext, msg *Int) {
+	restart := func(ctx *replay.RunContext, msg *Int) {
 		// Note this just tests restart.
 		key, _ := internal.DecodeKey(ctx.CreateEvent().ForeignID)
 		if key.Iteration < 5 && msg.Value == int64(key.Iteration) {
@@ -102,7 +102,7 @@ func TestActivityFunc(t *testing.T) {
 func TestWorkflowFunc(t *testing.T) {
 	require.PanicsWithError(t,
 		"invalid workflow function, input parameters not "+
-			"replay.RunContext, proto.Message: "+
+			"*replay.RunContext, proto.Message: "+
 			"func(context.Context, *example.Empty)",
 		func() {
 			replay.RegisterWorkflow(nil, nil, nil, "",
@@ -111,10 +111,10 @@ func TestWorkflowFunc(t *testing.T) {
 
 	require.PanicsWithError(t,
 		"invalid workflow function, output parameters not empty: "+
-			"func(replay.RunContext, *example.Empty) error",
+			"func(*replay.RunContext, *example.Empty) error",
 		func() {
 			replay.RegisterWorkflow(nil, nil, nil, "",
-				func(replay.RunContext, *Empty) error {
+				func(*replay.RunContext, *Empty) error {
 					return nil
 				})
 		})
@@ -130,7 +130,7 @@ func TestActivityErr(t *testing.T) {
 		}
 		return nil, fate.ErrTempt
 	}
-	workflow := func(ctx replay.RunContext, _ *Empty) {
+	workflow := func(ctx *replay.RunContext, _ *Empty) {
 		ctx.ExecActivity(activity, new(Empty), replay.WithName("act"))
 	}
 
@@ -190,7 +190,7 @@ func TestEarlyCompleteReplay(t *testing.T) {
 		return new(Empty), nil
 	}
 
-	workflow1 := func(ctx replay.RunContext, e *Empty) {
+	workflow1 := func(ctx *replay.RunContext, e *Empty) {
 		ctx.ExecActivity(activity, e, replay.WithName(w))
 	}
 
@@ -213,7 +213,7 @@ func TestEarlyCompleteReplay(t *testing.T) {
 	require.Len(t, el, 1)
 
 	// This workflow will replay the above run and just complete it immediately.
-	noop := func(ctx replay.RunContext, e *Empty) {}
+	noop := func(ctx *replay.RunContext, e *Empty) {}
 	replay.RegisterWorkflow(oneCtx(t), cl, new(test.MemCursorStore), ns, noop, replay.WithName(w))
 	awaitComplete(t, cl, ns, w, r)
 
@@ -263,7 +263,7 @@ func TestBootstrapComplete(t *testing.T) {
 
 	log.Info(ctx, "Starting new workflow that should bootstrap and complete")
 
-	noop := func(ctx replay.RunContext, _ *String) {}
+	noop := func(ctx *replay.RunContext, _ *String) {}
 	// This workflow will complete during bootstrap
 	replay.RegisterWorkflow(oneCtx(t), cl, cstore, ns, noop, replay.WithName(w))
 	awaitComplete(t, cl, ns, w, r)
@@ -705,8 +705,8 @@ func setup(t *testing.T, opts ...rsql.EventsOption) (context.Context, replay.Cli
 
 // makeWorkflow returns a workflow for testing.
 // It does n EnrichGreeting activities before calling PrintGreeting
-func makeWorkflow(n int) func(ctx replay.RunContext, name *String) {
-	return func(ctx replay.RunContext, name *String) {
+func makeWorkflow(n int) func(ctx *replay.RunContext, name *String) {
+	return func(ctx *replay.RunContext, name *String) {
 		for i := 0; i < n; i++ {
 			name = ctx.ExecActivity(EnrichGreeting, name).(*String)
 		}
