@@ -60,7 +60,12 @@ func ParseMessage(e *reflex.Event) (proto.Message, error) {
 		return nil, errors.Wrap(err, "unmarshal proto")
 	}
 
-	return a.UnmarshalNew()
+	msg, err := a.UnmarshalNew()
+	if err != nil {
+		return nil, errors.Wrap(err, "unmarshal any", j.MKV{"any_type": a.TypeUrl, "any_value": fmt.Sprint(a.Value)})
+	}
+
+	return msg, nil
 }
 
 type Key struct {

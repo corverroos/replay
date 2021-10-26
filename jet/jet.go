@@ -6,10 +6,13 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"testing"
 	"time"
 
 	"github.com/corverroos/rjet"
 	"github.com/luno/jettison/errors"
+	"github.com/luno/jettison/j"
+	"github.com/luno/jettison/jtest"
 	"github.com/luno/reflex"
 	"github.com/nats-io/nats.go"
 	"google.golang.org/protobuf/proto"
@@ -27,6 +30,57 @@ func New(ncl nats.JetStreamContext, stream string) Client {
 		ncl:    ncl,
 		stream: stream,
 	}
+}
+
+func NewForTesting(t *testing.T, cleanStreams ...string) (Client, nats.JetStreamContext) {
+	c, err := nats.Connect(nats.DefaultURL,
+		nats.ReconnectJitter(time.Millisecond, time.Millisecond))
+	jtest.RequireNil(t, err)
+
+	ncl, err := c.JetStream()
+	jtest.RequireNil(t, err)
+
+	t0 := time.Now()
+	for {
+		status := c.Status()
+		if status == nats.CONNECTED {
+			break
+		}
+		if time.Since(t0) > time.Second {
+			t.Fatalf("nats not connected")
+		}
+	}
+
+	const stream = "stream"
+
+	clean := func() {
+		for sinfo := range ncl.StreamsInfo() {
+			name := sinfo.Config.Name
+			if strings.HasPrefix(name, stream) {
+				_ = ncl.PurgeStream(name)
+				_ = ncl.DeleteStream(name)
+			}
+			for _, stream := range cleanStreams {
+				if strings.HasPrefix(name, stream) {
+					_ = ncl.PurgeStream(name)
+					_ = ncl.DeleteStream(name)
+				}
+			}
+		}
+	}
+
+	clean()
+	t.Cleanup(func() {
+		clean()
+		c.Close()
+	})
+
+	jc := New(ncl, stream)
+
+	_, err = ncl.AddStream(jc.StreamConfig())
+	jtest.RequireNil(t, err)
+
+	return jc, ncl
 }
 
 type Client struct {
@@ -56,24 +110,29 @@ func (c Client) InsertEvent(ctx context.Context, typ internal.EventType, key int
 	return err
 }
 
-func (c Client) insertEvent(ctx context.Context, typ internal.EventType, key internal.Key, message proto.Message) (uint64, error) {
-	b, err := proto.Marshal(message)
+func (c Client) insertEvent(ctx context.Context, typ internal.EventType, key internal.Key, message proto.Message) (*nats.PubAck, error) {
+	msg, err := newMsg(c.stream, typ, key, message)
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
 
-	m := newMsg(c.stream, typ, key, b)
+	ack, err := c.ncl.PublishMsg(msg, nats.Context(ctx))
+	if err != nil {
+		return nil, err
+	}
 
-	ack, err := c.ncl.PublishMsg(m, nats.Context(ctx))
-	return ack.Sequence, err
+	return ack, nil
 }
 
 // CompleteRun inserts a RunCompleted event for key.
 // It is a method on the internal.Client interface.
 func (c Client) CompleteRun(ctx context.Context, key internal.Key) error {
-	m := newMsg(c.stream, internal.RunCompleted, key, nil)
+	msg, err := newMsg(c.stream, internal.RunCompleted, key, nil)
+	if err != nil {
+		return err
+	}
 
-	_, err := c.ncl.PublishMsg(m, nats.Context(ctx))
+	_, err = c.ncl.PublishMsg(msg, nats.Context(ctx))
 	return err
 }
 
@@ -96,14 +155,12 @@ func (c Client) RunWorkflow(ctx context.Context, namespace, workflow, run string
 func (c Client) runWorkflow(ctx context.Context, namespace, workflow, run string, iter int, message proto.Message) (bool, error) {
 	key := internal.RunKey(namespace, workflow, run, iter)
 
-	b, err := proto.Marshal(message)
+	msg, err := newMsg(c.stream, internal.RunCreated, key, message)
 	if err != nil {
 		return false, err
 	}
 
-	m := newMsg(c.stream, internal.RunCreated, key, b)
-
-	ack, err := c.ncl.PublishMsg(m, nats.Context(ctx))
+	ack, err := c.ncl.PublishMsg(msg, nats.Context(ctx))
 	if err != nil {
 		return false, err
 	}
@@ -114,20 +171,17 @@ func (c Client) runWorkflow(ctx context.Context, namespace, workflow, run string
 func (c Client) SignalRun(ctx context.Context, namespace, workflow, run string, signal string, message proto.Message, extID string) (bool, error) {
 	key := internal.SignalKey(namespace, workflow, run, signal, extID)
 
-	apb, err := internal.ToAny(message)
+	msg, err := newMsg(c.stream, internal.RunSignal, key, message)
 	if err != nil {
 		return false, err
 	}
 
-	b, err := proto.Marshal(apb)
+	ack, err := c.ncl.PublishMsg(msg, nats.Context(ctx))
 	if err != nil {
 		return false, err
 	}
 
-	m := newMsg(c.stream, internal.RunSignal, key, b)
-
-	ack, err := c.ncl.PublishMsg(m, nats.Context(ctx))
-	return !ack.Duplicate, err
+	return !ack.Duplicate, nil
 }
 
 func (c Client) ListBootstrapEvents(ctx context.Context, key internal.Key, to string) ([]reflex.Event, error) {
@@ -142,7 +196,7 @@ func (c Client) ListBootstrapEvents(ctx context.Context, key internal.Key, to st
 		ctx, cancel := context.WithTimeout(ctx, time.Minute)
 		defer cancel()
 
-		sc, err := s.Stream(ctx, after, reflex.WithStreamToHead())
+		sc, err := s.Stream(ctx, after)
 		if err != nil {
 			return nil, err
 		}
@@ -156,12 +210,27 @@ func (c Client) ListBootstrapEvents(ctx context.Context, key internal.Key, to st
 				return nil, err
 			}
 
-			res = append(res, *e)
+			if !reflex.IsType(e.Type, internal.NoopEvent) {
+				res = append(res, *e)
+			}
 
 			if e.ID == to {
 				return res, nil
 			}
 		}
+	}
+
+	if to == "" {
+		key.Target = "noop"
+		key.Sequence = strconv.FormatInt(time.Now().UnixNano(), 10)
+		ack, err := c.insertEvent(ctx, internal.NoopEvent, key, nil)
+		if err != nil {
+			return nil, err
+		} else if ack.Duplicate {
+			return nil, errors.New("bug: bootstrap events noop duplicate", j.KS("key", key.Encode()))
+		}
+
+		to = strconv.FormatUint(ack.Sequence, 10)
 	}
 
 	sub := joinsub(
@@ -181,10 +250,12 @@ func (c Client) ListBootstrapEvents(ctx context.Context, key internal.Key, to st
 	// Stream signals that overlap with run iteration.
 
 	// Insert noop to ensure stream can complete
-	noop := internal.SignalKey(key.Namespace, key.Workflow, key.Run, "noop", strconv.FormatInt(time.Now().Unix(), 10))
-	noopSeq, err := c.insertEvent(ctx, internal.NoopEvent, noop, nil)
+	noop := internal.SignalKey(key.Namespace, key.Workflow, key.Run, "noop", strconv.FormatInt(time.Now().UnixNano(), 10))
+	ack, err := c.insertEvent(ctx, internal.NoopEvent, noop, nil)
 	if err != nil {
 		return nil, err
+	} else if ack.Duplicate {
+		return nil, errors.New("bug: bootstrap signal noop duplicate", j.KS("key", noop.Encode()))
 	}
 
 	sub = joinsub(
@@ -196,7 +267,7 @@ func (c Client) ListBootstrapEvents(ctx context.Context, key internal.Key, to st
 		strconv.Itoa(-1),
 		">")
 
-	sl, err := stream(sub, el[0].ID, strconv.FormatUint(noopSeq, 10))
+	sl, err := stream(sub, el[0].ID, strconv.FormatUint(ack.Sequence, 10))
 	if err != nil {
 		return nil, err
 	}
@@ -235,7 +306,17 @@ func (c Client) Internal() internal.Client {
 	return c
 }
 
-func newMsg(stream string, typ reflex.EventType, key internal.Key, data []byte) *nats.Msg {
+func newMsg(stream string, typ reflex.EventType, key internal.Key, message proto.Message) (*nats.Msg, error) {
+	apb, err := internal.ToAny(message)
+	if err != nil {
+		return nil, err
+	}
+
+	data, err := internal.Marshal(apb)
+	if err != nil {
+		return nil, err
+	}
+
 	k := key.Encode()
 	h := nats.Header{}
 	rjet.SetTypeHeader(h, typ)
@@ -246,21 +327,10 @@ func newMsg(stream string, typ reflex.EventType, key internal.Key, data []byte) 
 		Subject: keyToSubject(stream, key),
 		Header:  h,
 		Data:    data,
-	}
+	}, nil
 }
 
 func keyToSubject(stream string, k internal.Key) string {
-	if k.Target == "" {
-		return joinsub(
-			prefix,
-			stream,
-			k.Namespace,
-			k.Workflow,
-			k.Run,
-			strconv.Itoa(k.Iteration),
-			"_")
-	}
-
 	return joinsub(
 		prefix,
 		stream,
@@ -273,6 +343,11 @@ func keyToSubject(stream string, k internal.Key) string {
 }
 
 func joinsub(strs ...string) string {
+	for i := 0; i < len(strs); i++ {
+		if strs[i] == "" {
+			strs[i] = "_"
+		}
+	}
 	return strings.Join(strs, ".")
 }
 

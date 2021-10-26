@@ -2,7 +2,6 @@ package jet_test
 
 import (
 	"context"
-	"strings"
 	"testing"
 	"time"
 
@@ -13,62 +12,27 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/types/known/durationpb"
 
+	"github.com/corverroos/replay"
 	"github.com/corverroos/replay/internal"
 	"github.com/corverroos/replay/jet"
 )
 
 const (
 	cursor = "cursor"
-	stream = "replay_stream"
 	ns     = "namespace"
 	w      = "workflow"
 	r      = "run"
 )
 
+var _ replay.Client = jet.Client{}
+
 func setup(t *testing.T) (context.Context, nats.JetStreamContext, jet.Client, dqradix.Client) {
-	c, err := nats.Connect(nats.DefaultURL)
-	jtest.RequireNil(t, err)
-
-	ncl, err := c.JetStream()
-	jtest.RequireNil(t, err)
-
-	t0 := time.Now()
-	for {
-		status := c.Status()
-		if status == nats.CONNECTED {
-			break
-		}
-		if time.Since(t0) > time.Second {
-			t.Fatalf("nats not connected")
-		}
-	}
+	jc, ncl := jet.NewForTesting(t, "reflex")
 
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 
 	rc := dqradix.NewForTesting(t, cursor)
-	jtest.RequireNil(t, err)
-
-	clean := func() {
-		for sinfo := range ncl.StreamsInfo() {
-			name := sinfo.Config.Name
-			if strings.HasPrefix(name, stream) || strings.HasPrefix(name, "reflex") {
-				_ = ncl.PurgeStream(name)
-				_ = ncl.DeleteStream(name)
-			}
-		}
-	}
-
-	clean()
-	t.Cleanup(func() {
-		clean()
-		c.Close()
-	})
-
-	jc := jet.New(ncl, stream)
-
-	_, err = ncl.AddStream(jc.StreamConfig())
-	jtest.RequireNil(t, err)
 
 	return ctx, ncl, jc, rc
 }

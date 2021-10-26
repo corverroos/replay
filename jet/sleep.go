@@ -2,6 +2,7 @@ package jet
 
 import (
 	"context"
+	"fmt"
 	"path"
 	"time"
 
@@ -39,7 +40,7 @@ func RegisterSleeper(getCtx func() (context.Context, bool), cl replay.Client, cs
 
 		req, ok := message.(*replaypb.SleepRequest)
 		if !ok {
-			return errors.New("invalid sleep request")
+			return errors.New("invalid sleep request", j.KV("type", fmt.Sprintf("%T", message)))
 		}
 
 		err = q.AddMsg(ctx, &delayq.Msg{

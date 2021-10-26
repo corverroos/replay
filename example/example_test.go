@@ -6,13 +6,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/corverroos/replay"
-	"github.com/corverroos/replay/mysql/internal/test"
 	"github.com/luno/fate"
 	"github.com/luno/jettison/jtest"
 	"github.com/luno/jettison/log"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
+
+	"github.com/corverroos/replay"
+	"github.com/corverroos/replay/mysql/test"
 )
 
 //go:generate protoc --proto_path=. --go_out=. example.proto

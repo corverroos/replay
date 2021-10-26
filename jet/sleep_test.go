@@ -9,7 +9,6 @@ import (
 	"github.com/corverroos/rjet"
 	"github.com/luno/jettison/jtest"
 	"github.com/stretchr/testify/require"
-	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/durationpb"
 
 	"github.com/corverroos/replay/internal"
@@ -25,11 +24,8 @@ func TestSleep(t *testing.T) {
 		return ctx, ctx.Err() == nil
 	}
 
-	req := func(d time.Duration) *anypb.Any {
-		pb := &replaypb.SleepRequest{Duration: durationpb.New(d)}
-		apb, err := anypb.New(pb)
-		jtest.RequireNil(t, err)
-		return apb
+	req := func(d time.Duration) *replaypb.SleepRequest {
+		return &replaypb.SleepRequest{Duration: durationpb.New(d)}
 	}
 
 	jet.RegisterSleeperForTesting(getCtx, cl, cstore, delayq.New(rc, cursor))

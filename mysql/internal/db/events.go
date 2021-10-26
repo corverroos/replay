@@ -148,8 +148,8 @@ func RestartRun(ctx context.Context, dbc *sql.DB, events *rsql.EventsTable, key 
 
 func ListBootstrapEvents(ctx context.Context, dbc *sql.DB, key internal.Key) ([]reflex.Event, error) {
 	rows, err := dbc.QueryContext(ctx, "select id, `key`, type, timestamp, message "+
-		"from replay_events where namespace=? and workflow=? and run=? and iteration = ? and (type=? or type=? or type=?) order by id asc",
-		key.Namespace, key.Workflow, key.Run, key.Iteration, internal.RunCreated, internal.ActivityResponse, internal.RunCompleted)
+		"from replay_events where namespace=? and workflow=? and run=? and iteration = ? order by id asc",
+		key.Namespace, key.Workflow, key.Run, key.Iteration)
 	if err != nil {
 		return nil, err
 	}

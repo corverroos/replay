@@ -3,7 +3,6 @@ package test
 import (
 	"context"
 	"database/sql"
-	"github.com/corverroos/replay/mysql"
 	"net"
 	"testing"
 	"time"
@@ -16,6 +15,7 @@ import (
 	"github.com/corverroos/replay"
 	"github.com/corverroos/replay/client"
 	pb "github.com/corverroos/replay/internal/replaypb"
+	"github.com/corverroos/replay/mysql"
 )
 
 // SetupGRPC starts a replay grpc server and returns a connected client.
