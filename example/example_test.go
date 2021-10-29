@@ -124,7 +124,6 @@ func MaybeSignal(ctx context.Context, b Backends, f fate.Fate, i *Int) (*Empty, 
 		return &Empty{}, nil
 	}
 	i.Value += 100
-	fmt.Printf("JCR: signalling=%+v\n", i.Value)
 	_, err := b.Replay.SignalRun(ctx, "ns", "SignalWorkflow", "run", "signal", i, fmt.Sprint(i.Value))
 	return &Empty{}, err
 }

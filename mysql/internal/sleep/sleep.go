@@ -3,11 +3,8 @@ package sleep
 import (
 	"context"
 	"database/sql"
-	"fmt"
 	"path"
 	"time"
-
-	"github.com/corverroos/replay/mysql/internal/db"
 
 	"github.com/luno/fate"
 	"github.com/luno/jettison/errors"
@@ -18,6 +15,7 @@ import (
 	"github.com/corverroos/replay"
 	"github.com/corverroos/replay/internal"
 	"github.com/corverroos/replay/internal/replaypb"
+	"github.com/corverroos/replay/mysql/internal/db"
 )
 
 func RegisterForTesting(getCtx func() context.Context, cl replay.Client, cstore reflex.CursorStore, dbc *sql.DB) {
@@ -32,11 +30,6 @@ func Register(getCtx func() context.Context, cl replay.Client, cstore reflex.Cur
 	fn := func(ctx context.Context, f fate.Fate, e *reflex.Event) error {
 		if !reflex.IsType(e.Type, internal.SleepRequest) {
 			return nil
-		}
-
-		key, err := internal.DecodeKey(e.ForeignID)
-		if err != nil {
-			return err
 		}
 
 		message, err := internal.ParseMessage(e)
@@ -54,8 +47,6 @@ func Register(getCtx func() context.Context, cl replay.Client, cstore reflex.Cur
 		} else if err != nil {
 			return err
 		}
-
-		fmt.Printf("JCR: Sleeper inserted=%+v\n", key.Encode())
 
 		return nil
 	}
@@ -94,8 +85,6 @@ func completeSleepsOnce(ctx context.Context, cl internal.Client, dbc *sql.DB) er
 		if err != nil {
 			return err
 		}
-
-		fmt.Printf("JCR: popping sleep=%+v\n", key.Encode())
 
 		err = cl.InsertEvent(ctx, internal.SleepResponse, key, &replaypb.SleepDone{})
 		if err != nil {

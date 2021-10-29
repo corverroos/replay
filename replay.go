@@ -16,8 +16,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/corverroos/replay/internal"
-	"github.com/corverroos/replay/internal/replaypb"
 	"github.com/luno/fate"
 	"github.com/luno/jettison"
 	"github.com/luno/jettison/errors"
@@ -27,6 +25,9 @@ import (
 	"github.com/luno/reflex/rpatterns"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/durationpb"
+
+	"github.com/corverroos/replay/internal"
+	"github.com/corverroos/replay/internal/replaypb"
 )
 
 var debug = flag.Bool("replay_debug", false, "Verbose logging for debugging purposes")
@@ -546,7 +547,6 @@ func (s *wcState) RespondActivity(ctx context.Context, e *reflex.Event, key inte
 
 	// Signal sleep responses are special, drop them if the goroutine isn't waiting anymore.
 	if reflex.IsType(e.Type, internal.SleepResponse) && key.Target != internal.SleepTarget && !rs.IsAwaitingSignal(key, false) {
-		fmt.Printf("JCR: dropping ignored sleep=%+v\n", key.Encode())
 		return true, nil
 	}
 

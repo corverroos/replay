@@ -80,7 +80,6 @@ func TestRestart(t *testing.T) {
 	awaitCompletes(t, cl, ns, w, r, 5)
 
 	for i := 0; i < 5; i++ {
-		fmt.Printf("JCR: ListBootstrapEvents=%d\n", i)
 		el, err := cl.Internal().ListBootstrapEvents(ctx, internal.RunKey(ns, w, r, i), "")
 		jtest.RequireNil(t, err)
 		require.Len(t, el, 2)
@@ -643,14 +642,11 @@ func TestStream(t *testing.T) {
 		}
 
 		_, err = sc.Recv()
-		require.Equal(t, err, reflex.ErrHeadReached)
+		jtest.Require(t, reflex.ErrHeadReached, err)
 	}
 
-	fmt.Printf("JCR: 1=\n")
 	tl1 := []string{cre, req, res, req, res, out, com}
-	fmt.Printf("JCR: 2=\n")
 	testStream(t, "ns1", "w1", "run1", tl1...)
-	fmt.Printf("JCR: 3=\n")
 	testStream(t, "ns1", "w1", "", tl1...)
 	testStream(t, "ns1", "", "", tl1...)
 
@@ -688,9 +684,7 @@ func awaitCompletes(t *testing.T, cl replay.Client, namespace, workflow, run str
 	jtest.RequireNil(t, err)
 
 	for {
-		fmt.Printf("JCR: sc.Recv\n")
 		e, err := sc.Recv()
-		fmt.Printf("JCR: e=%+v\n", e)
 		if err == context.DeadlineExceeded {
 			require.Fail(t, "timeout: complete(s) not received", "remaining=%d", count)
 		}

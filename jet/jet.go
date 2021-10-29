@@ -221,16 +221,12 @@ func (c Client) ListBootstrapEvents(ctx context.Context, key internal.Key, to st
 	}
 
 	if to == "" {
-		key.Target = "noop"
-		key.Sequence = strconv.FormatInt(time.Now().UnixNano(), 10)
-		ack, err := c.insertEvent(ctx, internal.NoopEvent, key, nil)
+		// Insert noop event to ensure stream can complete
+		var err error
+		to, err = c.insertNoop(ctx, key.Namespace, key.Workflow, key.Run, key.Iteration)
 		if err != nil {
 			return nil, err
-		} else if ack.Duplicate {
-			return nil, errors.New("bug: bootstrap events noop duplicate", j.KS("key", key.Encode()))
 		}
-
-		to = strconv.FormatUint(ack.Sequence, 10)
 	}
 
 	sub := joinsub(
@@ -249,13 +245,10 @@ func (c Client) ListBootstrapEvents(ctx context.Context, key internal.Key, to st
 
 	// Stream signals that overlap with run iteration.
 
-	// Insert noop to ensure stream can complete
-	noop := internal.SignalKey(key.Namespace, key.Workflow, key.Run, "noop", strconv.FormatInt(time.Now().UnixNano(), 10))
-	ack, err := c.insertEvent(ctx, internal.NoopEvent, noop, nil)
+	// Insert noop signal to ensure stream can complete
+	to, err = c.insertNoop(ctx, key.Namespace, key.Workflow, key.Run, -1)
 	if err != nil {
 		return nil, err
-	} else if ack.Duplicate {
-		return nil, errors.New("bug: bootstrap signal noop duplicate", j.KS("key", noop.Encode()))
 	}
 
 	sub = joinsub(
@@ -267,7 +260,7 @@ func (c Client) ListBootstrapEvents(ctx context.Context, key internal.Key, to st
 		strconv.Itoa(-1),
 		">")
 
-	sl, err := stream(sub, el[0].ID, strconv.FormatUint(ack.Sequence, 10))
+	sl, err := stream(sub, el[0].ID, to)
 	if err != nil {
 		return nil, err
 	}
@@ -296,14 +289,100 @@ func (c Client) Stream(namespace, workflow, run string) reflex.StreamFunc {
 
 	s, err := rjet.NewStream(c.ncl, c.stream, rjet.WithSubjectFilter(joinsub(subl...)), rjet.WithForeignIDParser(parseForeignID))
 	if err != nil {
-		panic("unexpected error" + err.Error())
+		return func(ctx context.Context, after string, opts ...reflex.StreamOption) (reflex.StreamClient, error) {
+			return nil, err
+		}
 	}
 
-	return s.Stream
+	return func(ctx context.Context, after string, opts ...reflex.StreamOption) (reflex.StreamClient, error) {
+		// rjet doesn't support StreamToHead with subject filters:
+		// - Filter it out if present
+		// - insert a noop matching provided filter
+		// - customer wrapper returning ErrHeadReached at noop
+
+		var fopts []reflex.StreamOption
+		for _, opt := range opts {
+			sopts := new(reflex.StreamOptions)
+			opt(sopts)
+			if !sopts.StreamToHead {
+				fopts = append(fopts, opt)
+			}
+		}
+
+		var head string
+		if len(fopts) != len(opts) {
+			// StreamToHead detected (filtered).
+			var err error
+			head, err = c.insertNoop(ctx, namespace, workflow, run, 0)
+			if err != nil {
+				return nil, err
+			}
+		}
+
+		sc, err := s.Stream(ctx, after, fopts...)
+		if err != nil {
+			return nil, err
+		}
+
+		return streamToHead{
+			head: head,
+			sc:   sc,
+		}, nil
+	}
 }
 
 func (c Client) Internal() internal.Client {
 	return c
+}
+
+func (c Client) insertNoop(ctx context.Context, namespace, workflow, run string, iteration int) (string, error) {
+	if namespace == "" {
+		namespace = "_"
+	}
+	if workflow == "" {
+		workflow = "_"
+	}
+	if run == "" {
+		run = "_"
+	}
+	noop := internal.Key{
+		Namespace: namespace,
+		Workflow:  workflow,
+		Run:       run,
+		Iteration: iteration,
+		Target:    "noop",
+		Sequence:  strconv.FormatInt(time.Now().UnixNano(), 10),
+	}
+
+	ack, err := c.insertEvent(ctx, internal.NoopEvent, noop, nil)
+	if err != nil {
+		return "", err
+	} else if ack.Duplicate {
+		return "", errors.New("bug: bootstrap signal noop duplicate", j.KS("key", noop.Encode()))
+	}
+
+	return strconv.FormatUint(ack.Sequence, 10), nil
+}
+
+type streamToHead struct {
+	head string
+	sc   reflex.StreamClient
+}
+
+func (s streamToHead) Recv() (*reflex.Event, error) {
+	for {
+		e, err := s.sc.Recv()
+		if err != nil {
+			return nil, err
+		}
+		if e.ID == s.head {
+			return nil, errors.Wrap(reflex.ErrHeadReached, "")
+		}
+		if reflex.IsType(e.Type, internal.NoopEvent) {
+			continue
+		}
+		return e, nil
+	}
 }
 
 func newMsg(stream string, typ reflex.EventType, key internal.Key, message proto.Message) (*nats.Msg, error) {
