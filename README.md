@@ -2,7 +2,7 @@
 
 Replay is a robust durable asynchronous distributed application logic framework. 
 
-Inspired by [temporal](www.temporal.io) but implemented using reflex and mysql, it 
+Inspired by [temporal](https://www.temporal.io) but implemented using reflex and mysql, it 
 uses the event sourcing pattern combined with event streams resulting in fault-oblivious logic.
 
 - Robust: Automatic retries on all failures, makes it fault-oblivious to all temporary errors. 
